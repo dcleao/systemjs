@@ -1,0 +1,91 @@
+<!doctype html>
+
+<meta charset="utf-8">
+<script>
+	if (typeof Promise === 'undefined')
+		document.write('<script src="../node_modules/bluebird/js/browser/bluebird.core.js"><\/script>');
+</script>
+<script>
+	if (typeof fetch === 'undefined')
+		document.write('<script src="../node_modules/whatwg-fetch/fetch.js"><\/script>');
+</script>
+<script defer src="../node_modules/construct-style-sheets-polyfill/dist/adoptedStyleSheets.js"></script>
+<script>
+	// TODO IE11 URL polyfill testing
+	// if (typeof URL === 'undefined')
+	//	document.write()
+</script>
+
+<script src="../dist/system.js"></script>
+<script src="../dist/extras/named-register.js"></script>
+<script src="../dist/extras/use-default.js"></script>
+<script src="../src/temp/require.js"></script>
+
+<script>
+	System.amd.require.config({
+		paths: {
+			"amd-tests": "../src/temp/tests"
+		},
+		"map": {
+			"*": {
+				"amd-tests-global-alias": "amd-tests"
+			},
+			"amd-tests/amd-scoped-dep": {
+				"A": "amd-tests/amd-dependencyA"
+			}
+		}
+	});
+
+	function doTests(funs) {
+		
+		const testFuns = funs.slice();
+
+		return new Promise(function(resolve) {
+			
+			nextTest();
+
+			function nextTest() {
+				if(!testFuns.length) {
+					resolve();
+				} else {
+					const test = testFuns.shift();
+					Promise.resolve(test()).then(logModule, logModuleError);
+				}
+			}
+			
+			function logModule(exported) {
+				console.log("Loaded " + exported);
+				nextTest();
+			}
+
+			function logModuleError(error) {
+				console.log("Failed " + error);
+				nextTest();
+			}
+		});
+
+		
+	}
+	// Teste 1
+	
+	/*
+	require(["amd-tests/amd-anonymous"], logModule);
+	*/
+	doTests([
+		function() {
+			return System.import("amd-tests/amd-anonymous");
+		},
+		function() {
+			return System.import("amd-tests/amd-module-dep");
+		},
+		function() {
+			return System.import("amd-tests-global-alias/amd-anonymous");
+		},
+		function() {
+			return System.import("amd-tests/amd-scoped-dep");
+		},
+		function() {
+			return System.import("amd-tests/amd-bundleA");
+		}
+	]);
+</script>
