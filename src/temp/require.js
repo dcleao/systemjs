@@ -13,14 +13,14 @@
   let unnormalizedCounter = 1;
 
   // TODO: Check cycle detection is properly handled
-  // TODO: Remove support for children and late setting of baseUrl.
   // TODO: plugin onload.fromText
   // TODO: Check proper error handling
   // TODO: plugins, `config` argument ??
   // TODO: Receive configuration through global requirejs variable (when an object).
   // TODO: Other environments (Rhino? )
   // TODO: Review URL Regexps
-  // TODO: "Minify"
+  // TODO: "Minify" code / identifiers / structure.
+  // TODO: complete doclets
   // Not supported:
   // - .js recognized as URL.
   // - Map normal to plugin call.
@@ -52,7 +52,21 @@
   const base = assignProps({}, SystemJS.prototype, ["resolve", "instantiate", "getRegister"]);
 
   /**
-   * The `AmdSystemJS` class.
+   * The `AmdSystemJS` class adds support for AMD modules to SystemJS.
+   * 
+   * To that end, the following methods are overridden:
+   * [resolve]{@link AmdSystemJS#resolve}, 
+   * [instantiate]{@link AmdSystemJS#resolve} and
+   * [getRegister]{@link AmdSystemJS#resolve}.
+   * 
+   * The property [amd]{@link AmdSystemJS#amd}  
+   * gives access to a hierarchical object model of modules, 
+   * each represented by a node in the hierarchy, 
+   * reflecting the current AMD configuration.
+   * 
+   * For certain one-off operations, registering new nodes in the hierarchy
+   * would be costly (memory leak or waste).
+   * For these cases, missing nodes can be obtained _dettached_ from the hierarchy.
    * 
    * @name AmdSystemJS
    * @extends SystemJS
@@ -121,21 +135,28 @@
     },
 
     /** @override */
-    resolve: function(id, parentUrl) {
+    resolve: function(depId, parentUrl) {
       try {
         // Give precedence to other resolution strategies.
+        // Any isAbsoluteWeakUrl(depId) is handled by import maps.
         return base.resolve.apply(this, arguments);
 
       } catch (error) {
+        // No isAbsoluteWeakUrl URLs here!
+        if (DEBUG && isAbsoluteUrlWeak(depId)) {
+          throw error;
+        }
 
-        // TODO: normalize???
-        // TODO: parentUrl
-        const resolvedId = this.amd.normalize(id, true);
+        const refNode = this.__getOrCreateDetachedByUrl(parentUrl) || this.amd;
+        const normalizedId = refNode.normalizeDep(depId);
+        
+        // Throw if normalizedId has no assigned URL (i.e. does not have a defined path or bundle).
+        const node = this.amd.getOrCreateDetached(normalizedId);
+        if (node.path === null) {
+          throw error;
+        }
 
-        // TODO: Check that resolvedId is bound, i.e., it has a path/bundle or throw.
-
-        return resolvedId
-        // throw error;
+        return normalizedId
       }
     },
 
@@ -165,7 +186,7 @@
         }
 
         // Get or create the AMD node. Must be a child node.
-        importNode = this.amd.nodeById(idInfo.id, true);
+        importNode = this.amd.getOrCreate(idInfo.id);
         loadNode = importNode.bundleOrSelf;
 
         loadUrl = loadNode.url;
@@ -187,8 +208,7 @@
       let id = pluginId + "!" + (resourceId || "");
 
       // Determine the identifier of the dependent module (parentUrl), if AMD.
-      let refId = parentUrl != null ? this._urlToId(parentUrl) : null;
-      let refNode = refId !== null ? this.amd.nodeById(refId, true) : this.amd;
+      let refNode = this.__getOrCreateDetachedByUrl(parentUrl) || this.amd;
 
       return new Promise(function(resolve, reject) {
         // TODO: How to build config from this model...
@@ -221,7 +241,15 @@
     // Otherwise, must go through: `map`, `paths`, `bundles`, `packages`.
     // Ultimately, if no correspondence is found, null is returned.
     _urlToId: function(url) {
-      // TODO: implement me!!
+      // TODO: Implement _urlToId
+      if(!url) {
+        return null;
+      }
+    },
+
+    __getOrCreateDetachedByUrl: function(url) {
+      let id = this._urlToId(url);
+      return id && this.amd.getOrCreateDetached(id);
     },
 
     /** 
@@ -397,14 +425,14 @@
       let node = null;
       if (id !== null) {
         // Ensure normalized (assumes normalize is idempotent...)
-        fullyNormalizedId = this.amd.normalize(id, true);
+        fullyNormalizedId = this.amd.normalizeDefined(id);
 
         if (fullyNormalizedId !== null && this.__getByName(fullyNormalizedId) !== null) {
           this._log("Module '" + fullyNormalizedId + "' is already defined. Ignoring.", "warn");
           return undefined;
         }
 
-        node = this.amd.nodeById(fullyNormalizedId, true);
+        node = this.amd.getOrCreate(fullyNormalizedId);
       } else if (loadNode !== null) {
         node = loadNode;
         fullyNormalizedId = node.id;
@@ -479,7 +507,7 @@
           depValues[i] = exports;
         } else {
           // TODO: doing full normalization here circumvents resolve not handling parentUrl, yet...
-          registerDepIds.push(refNode.normalize(depRef, true));
+          registerDepIds.push(refNode.normalizeDep(depRef));
           registerDepSetters.push(createDepSetter(depValues, i));
         }
       }
@@ -528,23 +556,22 @@
     };
   }
 
-  function resolveUseDefault(ns) {
-    return ns && ns.__useDefault ? ns.default : ns;
-  }
-
   // #endregion
 
-  // #region Module Node Classes
+  // #region AbstractModuleNode Class
 
   /**
-   * @classdesc The `AbstractModuleNode` class describes a node in the AMD identifier namespace.
+   * @classdesc The `AbstractModuleNode` class describes a module in the AMD identifier namespace.
+   * 
+   * AMD modules which have no defined bare name, and thus are loaded directly by URL, 
+   * do *NOT* have an associated module node.
    * 
    * @name AbstractModuleNode
    * @class
    * 
    * @description Constructs a node.
    * @constructor
-   * @param {string} name - The name of the node
+   * @param {Object.<string, string>?} aliasMap - The map of aliases to use for this node.
    */
   function AbstractModuleNode(aliasMap) {
 
@@ -558,24 +585,25 @@
      * @readonly
      * @protected
      */
-    this._aliasMap = aliasMap || Object.create(null);
+    this._aliasMap = aliasMap;
 
     /**
-     * Gets the array of child nodes.
+     * Gets the array of attached child nodes. Lazily created.
      * 
-     * @type {Array.<ChldModuleNode>}
+     * @type {Array.<ChildModuleNode>?}
      * @readonly
+     * @private
      */
-    this.children = [];
+    this.__children = null;
 
     /**
-     * Gets the map of child nodes by their name.
+     * Gets the map of attached child nodes by their name.  Lazily created.
      * 
      * @type {Object.<string, ChldModuleNode>}
      * @readonly
      * @private
      */
-    this.__byName = Object.create(null);
+    this.__byName = null;
 
     /**
      * Gets an AMD `require` function which has this node as the context node.
@@ -595,6 +623,16 @@
      * Gets a value that indicates if this module is a root module.
      * 
      * @name isRoot
+     * @memberOf AbstractModuleNode#
+     * @type {boolean}
+     * @readonly
+     * @abstract
+     */
+
+    /**
+     * Gets a value that indicates if this module node is detached from the hierarchy.
+     * 
+     * @name isDetached
      * @memberOf AbstractModuleNode#
      * @type {boolean}
      * @readonly
@@ -655,18 +693,31 @@
      */
 
     /**
+     * Gets the array of attached child modules, if any; `null` otherwise.
+     * 
+     * @type {Array.<ChildModuleNode>?}
+     * @readonly
+     */
+    get children() {
+      return this.__children;
+    },
+
+    /**
      * Gets the child module with the given name, creating it if desired.
      * 
      * @param {string} name - The name of the child node.
      * @param {boolean} [createIfMissing=false] - Indicates that a child node with 
      * the given name should be created, if one does not exist.
+     * @param {boolean} [createDetached=false] - Indicates that missing child nodes 
+     * should be created detached from their parents.
+     * Only applies if `createIfMissing` is `true`.
      * 
      * @return {ChildModuleNode?} The child node, if any; `null` otherwise.
      */
-    childByName: function(name, createIfMissing) {
+    childByName: function(name, createIfMissing, createDetached) {
       let child = getOwn(this.__byName, name) || null;
       if (child === null && createIfMissing) {
-        child = new ChildModuleNode(name, this);
+        child = new ChildModuleNode(name, this, createDetached);
       }
 
       return child;
@@ -685,26 +736,35 @@
         throw new Error("Invalid argument.");
       }
 
-      this.children.push(child);
+      if (this.__children === null) {
+        this.__children = [];
+        this.__byName = Object.create(null);
+      }
+      
+      this.__children.push(child);
       this.__byName[child.name] = child;
     },
 
     // @virtual
-    nodeByRelativeId: function(normalizedRelativeId, createIfMissing) {
+    getRelative: function(normalizedId, createIfMissing, createDetached) {
       
       let parent = this;
 
-      const names = normalizedRelativeId.split("/");
+      const names = normalizedId.split("/");
       const L = names.length;
       let i = -1;
-      while ((++i < L) && (node = parent.childByName(names[i], createIfMissing)) !== null) {
+      while ((++i < L) && (node = parent.childByName(names[i], createIfMissing, createDetached)) !== null) {
         parent = node;
       }
       
       return node;
     },
 
+    // #region normalization
+
     // Supports AMD plugins.
+    // DEBUG and !Lax: 
+    // - Throws on URLs via normalizeSingle
     normalize: function(id, isFull, isLax) {
       if (isLax) {
         if (!id) {
@@ -715,7 +775,7 @@
           throw new Error("Invalid empty id.");
         }
       }
-      
+
       // TODO: integrate with parseAmdId?
       let normalizedId;
       let resourceId = null;
@@ -732,7 +792,7 @@
       normalizedId = this.normalizeSingle(normalizedId, isFull, isLax);
       
       if (isPluginCall) {
-        resourceId = this.__normalizeResource(normalizedId, resourceId);
+        resourceId = this.__normalizePluginResource(normalizedId, resourceId);
         
         return normalizedId + "!" + resourceId;
       }
@@ -741,37 +801,48 @@
     },
 
     // Does not support Amd plugin identifiers (e.g. "css!./styles").
+    // Does not support URLs.
     // Resolves "./" and "../" relative to this node's identifier.
     // - Throws on going above this node's id.
+    //
     // Strict / NonLax
     // - Throws on STAR.
     // - Throws on empty.
     // - Throws on containing "!".
+    // - Throws on (isAbsoluteUrlWeak) URL.
+    //
+    // Lax
+    // - Returns `null` if empty.
+    //
     // Full normalization:
     // - applies maps
     // - resolves package main
     // isLax: allows "*" and the "!" character; for use in resource ids.
-    normalizeSingle: function(id, isFull, isLax) {
+    normalizeSingle: function(singleId, isFull, isLax) {
       
       if (isLax) {
-        if (!id) {
+        if (!singleId) {
           return null;
         }
       } else if (DEBUG) {
-        if (!id) {
+        if (!singleId) {
           throw new Error("Invalid empty id.");
         }
 
-        if (id === STAR) {
+        if (singleId === STAR) {
           throw new Error("Invalid id '" + STAR + "'.");
         }
   
-        if (id.indexOf("!") >= 0) {
-          throw new Error("Non-plugin id expected. Got '" + id + "'.");
+        if (singleId.indexOf("!") >= 0) {
+          throw new Error("Plugin call id not allowed: '" + singleId + "'.");
+        }
+
+        if (isAbsoluteUrlWeak(singleId)) {
+          throw new Error("URL not allowed: '" + singleId + "'.");
         }
       }
       
-      let normalizedId = absolutizeId(id, this.parentId);
+      let normalizedId = absolutizeId(singleId, this.parentId);
       
       if (isFull) {
         // Mapping.
@@ -780,7 +851,7 @@
         normalizedId = this.applyMap(normalizedId);
 
         // Main.
-        const node = this.root.nodeById(normalizedId);
+        const node = this.root.get(normalizedId);
         if (node !== null) {
           normalizedId = node.mainOrSelf.id;
         }
@@ -789,8 +860,19 @@
       return normalizedId;
     },
 
-    // TODO: docs
-    __normalizeResource: function(normalizedPluginId, resourceId) {
+    // require(["idOrAbsURL", ...]
+    normalizeDep: function(depId) {
+      return isAbsoluteUrlWeak(depId) 
+        ? depId 
+        : this.normalize(depId, true);
+    },
+
+    // define(id, ...
+    normalizeDefined: function(definedId) {
+      return this.normalize(definedId, true);
+    },
+
+    __normalizePluginResource: function(normalizedPluginId, resourceId) {
       // If the plugin is loaded, use if to normalize resourceId.
       const plugin = resolveUseDefault(this.get(normalizedPluginId));
       if (!plugin) {
@@ -799,19 +881,20 @@
       }
 
       if (plugin.normalize) {
-        return plugin.normalize(resourceId, this.__normalizeResourceCore.bind(this));
+        return plugin.normalize(resourceId, this.normalizeResource.bind(this));
       }
       
       // Per RequireJS, nested plugin calls would not normalize correctly...
       if (resourceId.indexOf("!") < 0) {
-        return this.__normalizeResourceCore(resourceId);
+        return this.normalizeResource(resourceId);
       }
       
       return resourceId;
     },
 
-    // TODO: docs
-    __normalizeResourceCore: function(resourceId) {
+    // Default normalization used when loader plugin does not have a normalize method.
+    // pluginCallId = "<singleId>!<resourceId>"
+    normalizeResource: function(resourceId) {
       return this.normalizeSingle(resourceId, true, true);
     },
 
@@ -857,6 +940,7 @@
         prefixId = prefixId.substring(0, prefixIndex);
       }
     },
+    // #endregion
 
     configMap: function(mapSpec) {
 
@@ -886,15 +970,17 @@
      */
   });
 
-  // ---
+  // #endregion
 
-  function ChildModuleNode(name, parent) {
+  // #region ChildModuleNode Class
+  function ChildModuleNode(name, parent, isDetached) {
 
     if (DEBUG && (!parent || !name)) {
       throw new Error("Invalid arguments.");
     }
 
-    const aliasMap = Object.create(parent._aliasMap);
+    // When detached, no new configurations can be made, so reuse the parent's alias map.
+    const aliasMap = isDetached ? parent._aliasMap : Object.create(parent._aliasMap);
 
     AbstractModuleNode.call(this, aliasMap);
 
@@ -902,6 +988,7 @@
     this.__name = name;
     this.__parent = parent;
     this.__root = parent.root;
+    this.__isDetached = !!isDetached;
     
     // ---
     // Configuration properties.
@@ -912,12 +999,15 @@
     
     // The fixed path, if any.
     this.__fixedPath = null;
-    this.__cachedPath = null;
+    // `null` means no fixed path was defined for self of any of the ascendant nodes (except root).
+    this.__cachedPath = undefined;
 
     // ---
 
-    this.__root.__indexNode(this);
-    parent.__addChild(this);
+    if (!isDetached) {
+      this.__root.__indexNode(this);
+      parent.__addChild(this);
+    }
   }
 
   classExtend(ChildModuleNode, AbstractModuleNode, {
@@ -929,6 +1019,17 @@
     /** @override */
     get root() {
       return this.__root;
+    },
+
+    /** @override */
+    get isDetached() {
+      return this.__isDetached;
+    },
+
+    __assertAttached: function() {
+      if (this.isDetached) {
+        throw new Error("Operation invalid on dettached module nodes.");
+      }
     },
 
     /** @override */
@@ -993,9 +1094,11 @@
     setMain: function(relativeId) {
       // TODO: "foo/bar/main/.js" ?
       // TODO: can main be a plugin?
+      
+      this.__assertAttached();
 
-      this.__main = relativeId  
-        ? this.nodeByRelativeId(this.normalizeSingle(removeJsExtension(relativeId)), true)
+      this.__main = relativeId
+        ? this.getRelative(this.normalizeSingle(removeJsExtension(relativeId)), true)
         : null;
     },
 
@@ -1030,6 +1133,8 @@
 
     set fixedPath(value) {
 
+      this.__assertAttached();
+
       value = value ? removeTrailingSlash(value) : null;
       
       // Check if changed.
@@ -1040,17 +1145,18 @@
     },
 
     /**
-     * Gets the effective path of this module.
+     * Gets the effective path of this module, if one can be determined; `null`, otherwise.
      * 
      * When {@link ChildModuleNode#fixedPath} is specified, it is returned.
      * Otherwise, the path is built from the parent module's [path]{@link ChildModuleNode#path} 
      * and this module's [name]{@link AbstractModuleNode#name}.
+     * If the none of the ascendant modules has a specified `fixedPath`, `null` is returned.
      * 
-     * @type {string}
+     * @type {string?}
      * @readonly
      */
     get path() {
-      if (this.__cachedPath === null) {
+      if (this.__cachedPath === undefined) {
         this.__cachedPath = this.__buildPath();
       }
 
@@ -1084,7 +1190,14 @@
     get url() {
       const root = this.root;
       
-      let url = this.path + ".js";
+      
+      const path = this.path;
+      if (path === null) {
+        // TODO: WIP
+      }
+
+      // TODO: URL adds .JS to the path...
+      let url = path + ".js";
       
       // "//foo", "/foo" or "http://foo".
       if (!isAbsoluteUrlWeak(url)) {
@@ -1101,13 +1214,16 @@
 
     __invalidatePath: function() {
       
-      this.__cachedPath = null;
+      this.__cachedPath = undefined;
 
-      this.children.forEach(function(child) {
-        if (child.fixedPath === null) {
-          child.__invalidatePath();
-        }
-      });
+      const children = this.children;
+      if (children !== null) {
+        children.forEach(function(child) {
+          if (child.fixedPath === null) {
+            child.__invalidatePath();
+          }
+        });
+      }
     },
 
     __buildPath: function() {
@@ -1118,10 +1234,16 @@
       }
 
       const parent = this.parent;
+
+      // TODO: Should there be a flag to enable the URL of top-level nodes to fallback to their `name`?
+      // Do not allow top-level modules without a fixed path.
+      if (parent.isRoot) {
+        return null;
+      }
       
-      return parent.isRoot
-        ? this.name 
-        : (parent.path + "/" + this.name);
+      // Propagate `null` to child modules.
+      const parentPath = parent.path;
+      return parentPath && (parentPath + "/" + this.name);
     },
 
     /** @override */
@@ -1130,11 +1252,64 @@
     }
   });
 
-  // ---
+  function createRequire(refNode) {
+
+    const rootNode = refNode.root;
+
+    return objectCopy(require, {
+      // TODO: isBrowser flag
+      isBrowser: true,
+
+      toUrl: function(moduleNamePlusExt) {
+        // TODO: require.toUrl
+      },
+
+      // As soon as the exports object is created and
+      // the module is loading or has been loaded.
+      defined: function(id) {
+        // TODO: require.defined
+      },
+
+      // There is an attached node for it?
+      // 1. Normalize id.
+      //    1.1. If there is a plugin in it:
+      //      1.1.1. If the plugin is loaded and has a normalize method then use it to normalize resource name.
+      //      1.1.2. If the resource name has no "!" then normalize resource name normally.
+      //      1.1.3. Else, do not normalize name.
+      //    1.2. Else, normalize id normally.
+      // 2. Apply mapping to id.
+      specified: function(id) {
+        // TODO: require.specified
+        // return rootNode.get(refNode.normalize(id)) !== null;
+      }
+    });
+
+    // ---
+
+    function require(deps, callback, errback) {
+      
+      if (Array.isArray(deps)) {
+        // TODO: require asynchronous interface.
+
+        return require;
+      }
+  
+      // Synchronous interface. 
+      // TODO: require sync interface; throw if not loaded yet.
+      const id = deps;
+
+      // TODO: require sync interface; resolve.
+      return rootNode._systemJS.get(id);
+    }
+  }
+  // #endregion
+
+  // #region RootModuleNode Class
 
   function RootModuleNode(systemJS) {
 
-    AbstractModuleNode.call(this);
+    const aliasMap = Object.create(null);
+    AbstractModuleNode.call(this, aliasMap);
     
     /**
      * The associated SystemJS instance.
@@ -1183,7 +1358,7 @@
     this.define = createDefine(this);
   }
 
-  const baseNodeByRelativeId = AbstractModuleNode.prototype.nodeByRelativeId;
+  const baseGetRelative = AbstractModuleNode.prototype.getRelative;
 
   classExtend(RootModuleNode, AbstractModuleNode, {
     /** @override */
@@ -1194,6 +1369,11 @@
     /** @override */
     get root() {
       return this;
+    },
+
+    /** @override */
+    get isDetached() {
+      return false;
     },
 
     /** @override */
@@ -1241,23 +1421,31 @@
     },
 
     /** @override */
-    nodeByRelativeId: function(normalizedRelativeId, createIfMissing) {
+    getRelative: function(normalizedId, createIfMissing/*, createDetached*/) {
       
-      let node = getOwn(this.__byId, normalizedRelativeId) || null;
+      let node = getOwn(this.__byId, normalizedId) || null;
       if (node === null && createIfMissing) {
-        node = baseNodeByRelativeId.apply(this, arguments);
+        node = baseGetRelative.apply(this, arguments);
       }
 
       return node;
     },
 
-    nodeById: function(normalizedId, createIfMissing) {
-      return this.nodeByRelativeId(normalizedId, createIfMissing);
+    get: function(normalizedId) {
+      return this.getRelative(normalizedId);
+    },
+
+    getOrCreate: function(normalizedId) {
+      return this.getRelative(normalizedId, true);
+    },
+
+    getOrCreateDetached: function(normalizedId) {
+      return this.getRelative(normalizedId, true, true);
     },
 
     // @internal
     __indexNode: function(node) {
-      if (DEBUG && this.nodeById(node.id) !== null) {
+      if (DEBUG && this.get(node.id) !== null) {
         throw new Error("A node with id '" + node.id + "' is already defined.");
       }
 
@@ -1284,7 +1472,7 @@
               packageSpec = {name: packageSpec};
             }
 
-            this.nodeById(this.normalizeSingle(packageSpec.name), true)
+            this.getOrCreate(this.normalizeSingle(packageSpec.name))
               .configPackage(packageSpec);
           }
         }, this);
@@ -1292,7 +1480,7 @@
 
       eachOwn(config.paths, function(pathSpec, id) {
         if (pathSpec) {
-          this.nodeById(this.normalizeSingle(id), true)
+          this.getOrCreate(this.normalizeSingle(id))
             .configPath(pathSpec);
         }
       }, this);
@@ -1301,7 +1489,7 @@
         if (mapSpec) {
           const node = id === STAR
             ? this
-            : this.nodeById(this.normalizeSingle(id), true);
+            : this.getOrCreate(this.normalizeSingle(id));
           
           node.configMap(mapSpec);
         }
@@ -1409,57 +1597,6 @@
     }
   }
 
-  function createRequire(refNode) {
-
-    const rootNode = refNode.root;
-
-    return objectCopy(require, {
-      // TODO: isBrowser flag
-      isBrowser: true,
-
-      toUrl: function(moduleNamePlusExt) {
-        // TODO: require.toUrl
-      },
-
-      // As soon as the exports object is created and
-      // the module is loading or has been loaded.
-      defined: function(id) {
-        // TODO: require.defined
-      },
-
-      // There is a node for it?
-      // 1. Normalize id.
-      //    1.1. If there is a plugin in it:
-      //      1.1.1. If the plugin is loaded and has a normalize method then use it to normalize resource name.
-      //      1.1.2. If the resource name has no "!" then normalize resource name normally.
-      //      1.1.3. Else, do not normalize name.
-      //    1.2. Else, normalize id normally.
-      // 2. Apply mapping to id.
-      specified: function(id) {
-        // TODO: require.specified
-        return rootNode.nodeById(refNode.normalize(id), false) !== null;
-      }
-    });
-
-    // ---
-
-    function require(deps, callback, errback) {
-      
-      if (Array.isArray(deps)) {
-        // TODO: require asynchronous interface.
-
-        return require;
-      }
-  
-      // Synchronous interface. 
-      // TODO: require sync interface; throw if not loaded yet.
-      const id = deps;
-
-      // TODO: require sync interface; resolve.
-      return rootNode._systemJS.get(id);
-    }
-  }
-
   // #endregion
 
   // #region Utilities
@@ -1470,8 +1607,8 @@
     };
   }
 
-  function getOwn(o, p) {
-    return O_HAS_OWN.call(o, p) && o[p];
+  function getOwn(o, p, dv) {
+    return o && O_HAS_OWN.call(o, p) ? o[p] : dv;
   }
 
   function eachOwn(o, f, x) {
@@ -1538,6 +1675,10 @@
     }
 
     return Sub;
+  }
+
+  function resolveUseDefault(ns) {
+    return ns && ns.__useDefault ? ns.default : ns;
   }
 
   function absolutizeId(id, parentId) {
