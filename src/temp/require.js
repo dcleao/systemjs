@@ -1430,6 +1430,20 @@
       return this.__actualUrl;
     },
 
+    __setActualUrl: function(actualUrl) {
+      if (DEBUG && !actualUrl) {
+        throw new Error("Argument 'actualUrl' is required.");
+      }
+
+      if (DEBUG && this.__actualUrl) {
+        throw new Error("Actual URL already set.");
+      }
+
+      this.__actualUrl = actualUrl;
+
+      this.root.__onNodeActualUrlSet(this);
+    },
+
     __invalidatePath: function() {
       
       this.__cachedPath = undefined;
