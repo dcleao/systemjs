@@ -30,14 +30,15 @@
   // TODO: "__proto__" map lookup loophole
 
   // The following AMD/RequireJS features are not supported:
-  // - .js recognized as URL.
-  // - Map normal to plugin call.
-  // - path fallbacks
+  // - A dependency ending with ".js" being considered an URL and not a module identifier.
+  //   - The top-level require's `jsExtRegExp` property; used to filter out dependencies that are already URLs.
+  // - Being able to `map` an ("normal") identifier to a loader plugin call identifier.
+  // - Being able to specify `paths` fallbacks; when an array is provided, only the first value is considered.
   // - Creating new require contexts.
-  // - data-main and skipDataMain
-  // - PSn, Opera...
-  // - CommonJS-style factory dependencies detection (toString).
-  // - Configurable require.jsExtRegExp (Used to filter out dependencies that are already paths).
+  // - Specifying `data-main` in the `script` element used to load the AMD/RequireJS extra;
+  //   the `skipDataMain` configuration property is also not supported.
+  // - Environments such as: PSn, Opera...
+  // - CommonJS-style factory: detection of `require(.)` dependencies in factory function code, using `toString`.
   // - require.onError, require.createNode, require.load
   // - config.nodeRequire / all special NodeJS/CommonJS features
   // - require.defined/specified ? Are these worth it?
