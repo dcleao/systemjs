@@ -268,8 +268,8 @@
       let importNode = null;
       let loadNode = null;
 
-      // If it's not a URL, it's an AMD base identifier and it needs further resolution.
-      if (!isAbsoluteUrlWeak(loadUrl)) {
+      // If it's still an AMD base identifier, it needs further resolution.
+      if (isBareName(loadUrl)) {
         // Already in the named registry?
         const register = this.__getByName(resolvedId);
         if (register !== null) {
