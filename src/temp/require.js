@@ -380,16 +380,12 @@
      * The possibility to delete or undefine a module may also bring complications to managing the index.
      * 
      * Lastly, the HTTP request for a script may be redirected to a different URL.
-     * For an ES6 module, imports of relative modules are resolved relative to the new URL.
-     * For an AMD module, dependency modules are resolved relative to the module's _identifier_, 
-     * when one exists; to the new URL, otherwise.
-     * The final URLs of loaded modules would need to be added to the index.
+     * Yet, AFAIK, SystemJS is not aware of final URLs.
      * 
      * =======
      * 
      * - urlIndex[regularUrl] = id <-- used for prefix detection
      * - urlIndex[url       ] = id <-- maybe not needed
-     * - urlIndex[urlActual ] = id <-- actual URL is not guaranteed to be Regular...
      * 
      */
     __getCanonicalIdByUrl: function(url) {
@@ -1157,9 +1153,6 @@
     // The fixed path, if any.
     this.__fixedPath = null;
 
-    // The URL of the loaded module. Redirects may change the requested URL to another.
-    this.__actualUrl = null;
-
     // `null` means no fixed path was defined for self of any of the ascendant nodes (except root).
     this.__cachedPath = undefined;
 
@@ -1388,8 +1381,6 @@
      *    url = url + this.urlArgs(load-id, url)
      * 6. if bundle:
      *    url <- setUrlFragment(url, "#!cid=<id>")
-     * 7. when script loads and module is defined:
-     *    urlActual <- script.src (+ if bundle: ...)
      * 
      * @type {string?}
      * @readonly
@@ -1424,24 +1415,6 @@
       }
 
       return this.__cachedUrlRegular;
-    },
-
-    get actualUrl() {
-      return this.__actualUrl;
-    },
-
-    __setActualUrl: function(actualUrl) {
-      if (DEBUG && !actualUrl) {
-        throw new Error("Argument 'actualUrl' is required.");
-      }
-
-      if (DEBUG && this.__actualUrl) {
-        throw new Error("Actual URL already set.");
-      }
-
-      this.__actualUrl = actualUrl;
-
-      this.root.__onNodeActualUrlSet(this);
     },
 
     __invalidatePath: function() {
@@ -1611,7 +1584,7 @@
     this.__byId = Object.create(null);
 
     /**
-     * A map of all descendant modules by _regular_ and _actual_ URL.
+     * A map of all descendant modules by _regular_ URL.
      * 
      * @type {Object.<string, ChildModuleNode>}
      * @readonly
@@ -1817,10 +1790,7 @@
      * 
      * The algorithm proceeds by matching the URL against an index that maps an URL to the id of its module.
      * It is assumed that a single module can be mapped to any given path.
-     * The index will contain:
-     * 
-     * 1. the regular URLs of modules configured with fixed paths, and
-     * 2. the actual URLs of loaded modules (to take HTTP redirects into account).
+     * The index will contain the regular URLs of modules configured with fixed paths.
      * 
      * Note that, when the URL contains a query (`?`), it may be because:
      * 
@@ -1995,23 +1965,6 @@
       // Don't add if new regular url is taken by another node.
       if (regularUrlNew && !getOwn(this.__byUrl, regularUrlNew)) {
         this.__byUrl[regularUrlNew] = childNode;
-      }
-    },
-
-    /**
-     * Updates the URL index to account for a descendant node having been loaded
-     * and its actual URL becoming known.
-     * 
-     * @param {ChildModuleNode} childNode - The descendant node.
-     * @internal
-     * @private
-     * @see ChildModuleNode#actualUrl
-     */
-    __onNodeActualUrlSet: function(childNode) {
-      // Don't add if actual url is taken by another node (or self).
-      const actualUrl = childNode.actualUrl;
-      if (actualUrl && !getOwn(this.__byUrl, actualUrl)) {
-        this.__byUrl[actualUrl] = childNode;
       }
     }
   });
