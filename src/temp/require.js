@@ -9,9 +9,14 @@
   }];
   const STAR = "*";
   const RE_JS_EXT = /\.js$/i;
-  const RE_URL_PROTOCOL = /^[\w\+\.\-]+:/i
+  const RE_URL_PROTOCOL = /^[\w\+\.\-]+:/i;
+  const RE_URL_BLOB = /^blob:/i;
+  const RE_URL_DATA_OR_BLOB = /^(data|blob):/i;
+  const URL_MODULE_FRAGMENT = "#!cid=";
+
   let unnormalizedCounter = 1;
 
+  // TODO: Add license header.
   // TODO: Check cycle detection is properly handled
   // TODO: plugin onload.fromText
   // TODO: Check proper error handling
@@ -21,7 +26,10 @@
   // TODO: Review URL Regexps
   // TODO: "Minify" code / identifiers / structure.
   // TODO: complete doclets
-  // Not supported:
+  // TODO: .JS <> bare interop ?
+  // TODO: "__proto__" map lookup loophole
+
+  // The following AMD/RequireJS features are not supported:
   // - .js recognized as URL.
   // - Map normal to plugin call.
   // - path fallbacks
@@ -147,7 +155,7 @@
           throw error;
         }
 
-        const refNode = this.__getOrCreateDetachedByUrl(parentUrl) || this.amd;
+        const refNode = this.__getOrCreateNodeDetachedByUrl(parentUrl) || this.amd;
         const normalizedId = refNode.normalizeDep(depId);
         
         // Throw if normalizedId has no assigned URL (i.e. does not have a defined path or bundle).
@@ -158,6 +166,97 @@
 
         return normalizedId
       }
+    },
+
+    /**
+     * Gets the canonical identifier of a given URL, if one exists; `null`, otherwise.
+     * 
+     * This operation is the _possible_ inverse of the {@link SystemJS#resolve} operation.
+     * 
+     * ## Canonical Identifier
+     * 
+     * Given all of the identifiers which _globally_ map to a given URL,
+     * the canonical identifier is chosen according to the following precedence order rules:
+     * 
+     * 1. has the smallest number of segments -- an id closer to the root is a more direct one;
+     * 2. has the greatest number of prefix segments -- an id with more "predefined" segments is more tailored;
+     * 3. is before in ascending order of segment names -- lastly, for predictability.
+     * 
+     * ## URL canonical identifier annotation fragment
+     * 
+     * If a URL contains a fragment with the form `#!cid=<id>`, 
+     * it is trusted that `<id>` is its canonical identifier.
+     * 
+     * For example, 
+     * the canonical identifier of the URL 
+     * `http://my-company.com/scripts/utils.js#!cid=@my-company/core/utils` 
+     * is `@my-company/core/utils`.
+     * 
+     * ## Import Maps
+     * 
+     * When defined via the import map,
+     * the canonical identifier is based on a bare name defined in the global scope.
+     * 
+     * ## AMD
+     * 
+     * When defined via the AMD configuration,
+     * the canonical identifier is based on a bare name which either:
+     * a) has as associated path (via `paths`), or 
+     * b) has an associated bundle which has an associated path (via `bundles` and `paths`).
+     * 
+     * To be able to determine the canonical identifier of a bundled module,
+     * the given URL must contain the special fragment canonical identifier annotation.
+     * 
+     * For example, the canonical identifier of the URL
+     * `http://my-company.com/scripts/bundle.js#!cid=bundled/module/id`
+     * is `bundled/module/id`.
+     * 
+     * ## Example
+     * 
+     * Take the following hypothetical global-scope imports/paths configurations:
+     * 
+     * ```json
+     * {
+     *   "a/b":   "./foo/bar",
+     *   "a/c":   "./foo/bar",
+     *   "c/d/e": "./foo",
+     *   "f":     "./foo",
+     *   "g":     "./foo/bar"
+     * }
+     * ```
+     * 
+     * Additionally, given the URL `./foo/bar/duu.js`, 
+     * any of the following identifiers, sorted according to precedence order, 
+     * resolves to it:
+     * 
+     * 1. `"g/duu"`         (2 segments)
+     * 2. `"a/b/duu"`       (3 segments; 2 prefix segments; b < c)
+     * 3. `"a/c/duu"`       (3 segments; 2 prefix segments)
+     * 4. `"f/bar/duu"`     (3 segments; 1 prefix segment)
+     * 5. `"c/d/e/bar/duu"` (5 segments; 3 prefix segments)
+     * 
+     * The canonical identifier would be `g/duu`.
+     */
+    resolveInverse: function(url) {
+      // ## SystemJS Common.
+      // 1. ?
+      if (!url) {
+        // returning `null` would not help when overriding,
+        // as it will mean no match from lower layer.
+        throw new Error("Argument 'url' is required.");
+      }
+
+      // 2. If the fragment #!cid=<id> is there, just trust it and return the module identifier.
+      const moduleFragmentIndex = url.indexOf(URL_MODULE_FRAGMENT);
+      if (moduleFragmentIndex >= 0) {
+        return url.substr(moduleFragmentIndex + URL_MODULE_FRAGMENT.length);
+      }
+
+      // ## SystemJS - Import Maps
+      // TODO: Implement resolveInverse for Import Maps URLs.
+
+      // ## SystemJS - AMD
+      return this.amd.getCanonicalIdOf(url);
     },
 
     /** @override */
@@ -189,6 +288,8 @@
         importNode = this.amd.getOrCreate(idInfo.id);
         loadNode = importNode.bundleOrSelf;
 
+        // TODO: if bundle: setFragment(#!cid=<id>)
+        
         loadUrl = loadNode.url;
       }
 
@@ -208,10 +309,10 @@
       let id = pluginId + "!" + (resourceId || "");
 
       // Determine the identifier of the dependent module (parentUrl), if AMD.
-      let refNode = this.__getOrCreateDetachedByUrl(parentUrl) || this.amd;
+      let refNode = this.__getOrCreateNodeDetachedByUrl(parentUrl) || this.amd;
 
       return new Promise(function(resolve, reject) {
-        // TODO: How to build config from this model...
+        // TODO: Build overall config for loader plugins
         let config = {};
 
         function onLoadCallback(value) {
@@ -221,7 +322,8 @@
         onLoadCallback.error = reject;
 
         onLoadCallback.fromText = function(text, textAlt) {
-          // TODO: resolve from a given text to eval as if it were module _resourceId_.
+          // TODO: onload.fromText - eval text as if it were a module script being loaded 
+          // assuming its id is resourceId.
           if (textAlt) {
             text = textAlt;
           }
@@ -234,21 +336,70 @@
       });
     },
 
-    // Id cannot be that of an AMD loader plugin call, as these don't really have a URL...
-    // If URL is that of a bundle, it must have a fragment such as `#!mid=original/bundled/module`,
-    // or the returned module identifier is that of the bundle itself.
-    // If URL is the result of a previous `resolve` operation, looking up the inverse resolutions map immediately yields the result.
+    // Why Canonical Ids for Import Maps
+    // Ids resolved by the import map are also supported.
+    // - Supports the case where an AMD module is loaded via import map and not via AMD config paths.
+    // - In instantiate, if a URL is received, try to unresolve it and obtain the original id.
+    //   If an identifier exists, use it to match found anonymous AMD modules.
+    // - Supports cases where, a non AMD register still needs to know its logical, canonical identifier.
+    //   Can be used for identifier persistence use cases or, less critically, for purposes of obtaining module configurations.
+    //   (rules can be mapped from id to URL, at runtime, and 
+    //    modules can obtain their configuration given their URL / import.meta.url).
+
+    // or the returned module identifier will be that of the bundle itself.
+    // If URL is the result of a previous `resolve` operation, 
+    // looking up the inverse resolutions map immediately yields one or more results...
     // Otherwise, must go through: `map`, `paths`, `bundles`, `packages`.
     // Ultimately, if no correspondence is found, null is returned.
-    _urlToId: function(url) {
-      // TODO: Implement _urlToId
-      if(!url) {
-        return null;
-      }
+
+    /**
+     * Gets the canonical identifier of a given URL, if one exists; `null`, otherwise.
+     * 
+     * ## Implementation
+     * 
+     * ### URL Index
+     * 
+     * Building a URL index -- which maps each url to a set of module ids -- 
+     * of all past resolutions done via `resolve` would include the inapplicable results of _scoped_ identifiers 
+     * (both for AMD and Import Maps),
+     * as there is no information at this location about the scope of the mapping used to resolve an identifier.
+     * 
+     * To circumvent this, at the cost of performance, 
+     * resolutions with a `parentUrl` could be internally repeated without a `parentUrl`.
+     * If the result was be the same, then it would be due to a global scope mapping,
+     * one which could be registered.
+     * 
+     * However, even if such an index was built,
+     * it would only allow determining the canonical identifiers of _previously resolved_ modules,
+     * and so, the general algorithm which determines the canonical identifier for any given URL
+     * would need to be implemented anyway.
+     * 
+     * There's also the problem of the index growing unboundedly, 
+     * even though that would not be visible for most applications.
+     * 
+     * The possibility to delete or undefine a module may also bring complications to managing the index.
+     * 
+     * Lastly, the HTTP request for a script may be redirected to a different URL.
+     * For an ES6 module, imports of relative modules are resolved relative to the new URL.
+     * For an AMD module, dependency modules are resolved relative to the module's _identifier_, 
+     * when one exists; to the new URL, otherwise.
+     * The final URLs of loaded modules would need to be added to the index.
+     * 
+     * =======
+     * 
+     * - urlIndex[regularUrl] = id <-- used for prefix detection
+     * - urlIndex[url       ] = id <-- maybe not needed
+     * - urlIndex[urlActual ] = id <-- actual URL is not guaranteed to be Regular...
+     * 
+     */
+    __getCanonicalIdByUrl: function(url) {
+      // TODO: Implement __getCanonicalIdByUrl
+      
+
     },
 
-    __getOrCreateDetachedByUrl: function(url) {
-      let id = this._urlToId(url);
+    __getOrCreateNodeDetachedByUrl: function(url) {
+      let id = this.__getCanonicalIdByUrl(url);
       return id && this.amd.getOrCreateDetached(id);
     },
 
@@ -469,7 +620,7 @@
      */
     __createAmdRegister: function(loadUrl, loadNode, node, depRefs, execute) {
       
-      // TODO: When a bundle (node !== loadNode), compose URL with #mid=<node.id>?
+      // TODO: When a bundle (node !== loadNode), compose URL with #cid=<node.id>?
       const moduleUrl = loadUrl;
 
       const exports = {};
@@ -723,6 +874,13 @@
       return child;
     },
 
+    eachChild: function(f, x) {
+      const children = this.children;
+      if (children !== null) {
+        children.forEach(f, x || this);
+      }
+    },
+
     /** 
      * Adds the given child module to the list of children.
      * 
@@ -763,7 +921,7 @@
     // #region normalization
 
     // Supports AMD plugins.
-    // DEBUG and !Lax: 
+    // When DEBUG and !Lax: 
     // - Throws on URLs via normalizeSingle
     normalize: function(id, isFull, isLax) {
       if (isLax) {
@@ -917,7 +1075,6 @@
       let prefixId = normalizedId;
       let prefixIndex = -1;
       while (true) {
-        // TODO: ignoring "__proto__" property loophole...
         const resolvedPrefixId = this._aliasMap[prefixId];
         if (resolvedPrefixId) {
           // Was mapped.
@@ -999,8 +1156,15 @@
     
     // The fixed path, if any.
     this.__fixedPath = null;
+
+    // The URL of the loaded module. Redirects may change the requested URL to another.
+    this.__actualUrl = null;
+
     // `null` means no fixed path was defined for self of any of the ascendant nodes (except root).
     this.__cachedPath = undefined;
+
+    // `null` means no fixed path was defined (idem)...
+    this.__cachedUrlRegular = undefined;
 
     // ---
 
@@ -1135,12 +1299,29 @@
 
       this.__assertAttached();
 
-      value = value ? removeTrailingSlash(value) : null;
+      const newValue = value ? removeTrailingSlash(value) : null;
       
       // Check if changed.
-      if (this.__fixedPath !== value) {
-        this.__fixedPath = value;
+      const oldValue = this.__fixedPath;
+      if (oldValue !== newValue) {
+        
+        const regularUrlOld = oldValue && this.regularUrl;
+        
+        // Set.
+        this.__fixedPath = newValue;
+
         this.__invalidatePath();
+        this.__invalidateRegularUrl();
+
+        const regularUrlNew = newValue && this.regularUrl;
+
+        // If either old or new value are non-null, 
+        // then this node needs to have its regularUrl re-indexed!
+        // Also, only need to re-index if regularUrl actually changed.
+        // If both are null, then they're equal, so the !== test covers both conditions.
+        if (regularUrlNew !== regularUrlOld) {
+          this.root.__onNodeRegularUrlChanged(this, regularUrlNew, regularUrlOld);
+        }
       }
     },
 
@@ -1184,48 +1365,84 @@
     /**
      * Gets the URL of this module.
      * 
-     * @type {string}
+     * The URL is determined from the module's {@link AbstractModuleNode#id}
+     * using the following procedure:
+     * 
+     * TODO: review procedure description
+     * 1. if this.bundle
+     *    return this.bundle.url
+     * 2. let loadId <- this.id
+     *    let regularUrl <- this.url
+     * 2. if this.bundle:
+     *    loadId = this.bundle.id
+     *    regularUrl = this.bundle.url
+     * 3. let regularUrl <- path(loadId)
+     *    if no path then url <- null
+     *    return url
+     * 4. if not (regularUrl is "data:..." or "blob:..." URL or has a "?")
+     *    regularUrl = regularUrl + ".js"
+     * 5. if not (regularUrl is "/..." or "//..." or "pro+to-col:...")
+     *    regularUrl = this.baseUrl + regularUrl
+     * 4. let url = regularUrl
+     * 5. if this.urlArgs and not url is "blob:...":
+     *    url = url + this.urlArgs(load-id, url)
+     * 6. if bundle:
+     *    url <- setUrlFragment(url, "#!cid=<id>")
+     * 7. when script loads and module is defined:
+     *    urlActual <- script.src (+ if bundle: ...)
+     * 
+     * @type {string?}
      * @readonly
      */
     get url() {
-      const root = this.root;
-      
-      
-      const path = this.path;
-      if (path === null) {
-        // TODO: WIP
-      }
-
-      // TODO: URL adds .JS to the path...
-      let url = path + ".js";
-      
-      // "//foo", "/foo" or "http://foo".
-      if (!isAbsoluteUrlWeak(url)) {
-        url = (root.baseUrl || "./") + url;
-      }
-
-      const urlArgs = root.urlArgs;
-      if (urlArgs !== null) {
-        url += urlArgs(this.id, url);
+      let url = this.regularUrl;
+      if (url !== null) {
+        
+        // Add .js extension.
+        const isDataOrBlobUrl = RE_URL_DATA_OR_BLOB.test(url);
+        if (!isDataOrBlobUrl && url.indexOf("?") < 0) {
+          url += ".js";
+        }
+        
+        const urlArgs = this.root.urlArgs;
+        if (urlArgs) {
+          const isBlobUrl = isDataOrBlobUrl && RE_URL_BLOB.test(url);
+          if (!isBlobUrl) {
+            // Append any query parameters to URL.
+            // Function should detect if ? or & is needed...
+            url += urlArgs(this.id, url);
+          }
+        }
       }
       
       return url;
+    },
+
+    get regularUrl() {
+      if (this.__cachedUrlRegular === undefined) {
+        this.__cachedUrlRegular = this.__buildRegularUrl();
+      }
+
+      return this.__cachedUrlRegular;
+    },
+
+    get actualUrl() {
+      return this.__actualUrl;
     },
 
     __invalidatePath: function() {
       
       this.__cachedPath = undefined;
 
-      const children = this.children;
-      if (children !== null) {
-        children.forEach(function(child) {
-          if (child.fixedPath === null) {
-            child.__invalidatePath();
-          }
-        });
-      }
+      this.eachChild(function(child) {
+        // Stop invalidation propagation if child node does not inherit the parent's path.
+        if (child.fixedPath === null) {
+          child.__invalidatePath();
+        }
+      });
     },
 
+    // ~ on fixedPath and on parent.path
     __buildPath: function() {
       
       const fixedPath = this.fixedPath;
@@ -1244,6 +1461,52 @@
       // Propagate `null` to child modules.
       const parentPath = parent.path;
       return parentPath && (parentPath + "/" + this.name);
+    },
+
+    // Called when the root node's baseUrl is changed.
+    __onBaseUrlChanged: function() {
+      
+      // regularUrl cannot be currently indexed if there is no cached value for it.
+      // Also, if the cached value is null, that won't change with baseUrl.
+      const regularUrlOld = this.__cachedUrlRegular;
+      if (regularUrlOld != null) {
+
+        this.__invalidateRegularUrl();
+        
+        // Module is indexed by regularUrl if it has a fixedPath.
+        if (this.fixedPath) {
+          regularUrlNew = this.regularUrl;
+
+          if (regularUrlNew !== regularUrlOld) {
+            this.root.__onNodeRegularUrlChanged(this, regularUrlNew, regularUrlOld);
+          }
+        }
+      }
+
+      this.eachChild(this.__onBaseUrlChanged);
+    },
+
+    __invalidateRegularUrl: function() {
+      this.__cachedUrlRegular = undefined;
+    },
+
+    // ~ on path and baseUrl
+    __buildRegularUrl: function() {
+      // If there is no `path`, there can be no URL.
+      const path = this.path;
+      if (path === null) {
+        return null;
+      }
+
+      let url = path;
+
+      // Not "//foo", "/foo" or "http://foo".
+      if (!isAbsoluteUrlWeak(url)) {
+        url = (this.root.baseUrl || "./") + url;
+      }
+
+      // Let base implementation apply further URL normalizations and URL mappings via Import Map!
+      return base.resolve(url);
     },
 
     /** @override */
@@ -1309,6 +1572,7 @@
   function RootModuleNode(systemJS) {
 
     const aliasMap = Object.create(null);
+
     AbstractModuleNode.call(this, aliasMap);
     
     /**
@@ -1329,6 +1593,17 @@
      * @private
      */ 
     this.__byId = Object.create(null);
+
+    /**
+     * A map of all descendant modules by _regular_ and _actual_ URL.
+     * 
+     * @type {Object.<string, ChildModuleNode>}
+     * @readonly
+     * @private
+     * 
+     * @see ChildModuleNode#url
+     */ 
+    this.__byUrl = Object.create(null);
 
     /**
      * The base URL for relative paths.
@@ -1401,7 +1676,15 @@
     },
 
     set baseUrl(value) {
-      this.__baseUrl = value ? ensureTrailingSlash(value) : null;
+      const newValue = value ? ensureTrailingSlash(value) : null;
+      if (this.__baseUrl !== newValue) {
+        this.__baseUrl = newValue;
+
+        this.eachChild(function(child) {
+          child.__onBaseUrlChanged();
+        });
+      }
+      
     },
 
     get urlArgs() {
@@ -1441,15 +1724,6 @@
 
     getOrCreateDetached: function(normalizedId) {
       return this.getRelative(normalizedId, true, true);
-    },
-
-    // @internal
-    __indexNode: function(node) {
-      if (DEBUG && this.get(node.id) !== null) {
-        throw new Error("A node with id '" + node.id + "' is already defined.");
-      }
-
-      this.__byId[node.id] = node;
     },
 
     configure: function(config) {
@@ -1500,9 +1774,216 @@
       // TODO: bundles
     },
 
+    /**
+     * Gets the canonical identifier of the module which has the given URL, if any;
+     * `null`, if one does not exist.
+     *
+     * Note that the given URL cannot correspond to the identifier of a _loader plugin call_, 
+     * as these types of modules are virtual and don't have a URL.
+     * 
+     * ## Algorithm
+     * 
+     * If the URL contains an URL fragment, the fragment is ignored, 
+     * as it does not affect script "identity" and mapping.
+     * 
+     * The algorithm proceeds by matching the URL against an index that maps an URL to the id of its module.
+     * It is assumed that a single module can be mapped to any given path.
+     * The index will contain:
+     * 
+     * 1. the regular URLs of modules configured with fixed paths, and
+     * 2. the actual URLs of loaded modules (to take HTTP redirects into account).
+     * 
+     * Note that, when the URL contains a query (`?`), it may be because:
+     * 
+     * 1. of a redirect returned a completely different URL (should match exactly on the index);
+     * 2. when `urlArgs` is defined, the function added it (can add ? or &);
+     * 3. it was already part of the module's `regularUrl`.
+     * 
+     * Whatever the case, the implemented algorithm removes each part of the URL, 
+     * from the end, matching it with the URL index, 
+     * to find the longest (most specific) configured regular URL, 
+     * while ignoring if `urlArgs` added ? or & or none.
+     * 
+     * E.g. URL match attempts (without some special cases):
+     * 
+     * 1. `foo/bar.js?a=b&c=d`
+     * 2. `foo/bar.js?a=b`
+     * 3. `foo/bar.js`
+     * 4. `foo/bar`
+     * 5. `foo`
+     * 
+     * ## Index maintenance
+     * 
+     * Because AMD configuration can be made at anytime,
+     * the URL index needs to be invalidated/updated upon changes to 
+     * the configuration properties which influence the modules' URL:
+     * `baseUrl`, `urlArgs`, `paths`, `packages` or `bundles`.
+     * 
+     * The `urlArgs` property is a function which allows to dynamically determine additional query string arguments, 
+     * given the (load) module identifier and the normal URL, built from the other configurations.
+     * The result is appended to the normal URL and so cannot break the _regularity_ of built URLs.
+     * 
+     * @param {string} url - The URL of the module. Assumed normalized.
+     * No special cases are tested such as `.` or `..` path segments.
+     * 
+     * @return {string?} The canonical identifier or `null`.
+     * @private
+     */
+    getCanonicalIdOf: function(url) {
+      
+      const STATE_INIT = 0;
+      const STATE_NEXT_QUERY_ARG = 1;
+      const STATE_FIRST_PATH_SEGMENT = 2;
+      const STATE_NEXT_PATH_SEGMENT = 3;
+
+      if (!url) {
+        return null;
+      }
+
+      // Remove the URL fragment, if any.
+      url = removeUrlFragment(url);
+      
+      let state = STATE_INIT;
+      let indexQuery = -1;
+      let urlPrevious = null;
+      let idSuffix = "";
+
+      while (true) {
+        // Has URL changed (or is it the first iteration)?
+        if (urlPrevious !== url) {
+          const node = getOwn(this.__byUrl, url);
+          if (node) {
+            return node.id + idSuffix;
+          }
+
+          urlPrevious = url;
+        }
+        // Else only the state changed.
+
+        if (state === STATE_INIT) {
+          // Is there a query part?
+          indexQuery = url.indexOf("?");
+          if (indexQuery < 0) {
+            // > No query part.
+            state = STATE_FIRST_PATH_SEGMENT;
+
+          } else if (this.urlArgs && !RE_URL_BLOB.test(url)) {
+            // > There is a query part AND `urlArgs` was used.
+            // E.g. foo.org/bar.js?a=b&c=d
+            state = STATE_NEXT_QUERY_ARG;
+
+          } else {
+            // > There is a query part AND `urlArgs` does not exist or was not used.
+            // The `?` has to be part of the fixed path, 
+            // and such paths do not work well with composition, 
+            // and so can only be used reliably for leaf modules.
+            // Concluding. No other matches are possible.
+            return null;
+          }
+        } else if (state === STATE_NEXT_QUERY_ARG) {
+          // Remove the next query argument, if any, and repeat match.
+          const index = url.lastIndexOf("&", indexQuery + 1);
+          if (index < 0) {
+            // No more query args, so remove the query.
+            // E.g. `foo.org/bar.js?a=b`
+            url = url.substring(0, indexQuery);
+            // E.g. `foo.org/bar.js`
+            state = STATE_FIRST_PATH_SEGMENT;
+          } else {
+            // E.g. `foo.org/bar.js?a=b&c=d`
+            ur = url.substring(0, index);
+            // E.g. `foo.org/bar.js?a=b`
+          }
+        } else if (state === STATE_FIRST_PATH_SEGMENT) {
+          if (!RE_URL_DATA_OR_BLOB.test(url)) {
+            // Remove the ".js" extension, which is automatically added.
+            // E.g. foo.org/bar.js
+            url = removeJsExtension(url);
+            // E.g. foo.org/bar
+          }
+          
+          state = STATE_NEXT_PATH_SEGMENT;
+
+        } else if (state === STATE_NEXT_PATH_SEGMENT) {
+          // Chop the next `/segment`.
+          const index = url.lastIndexOf("/");
+          if (index < 0) {
+            // No (more) segments. No match found.
+            // E.g. `foo.org`
+            return null;
+          }
+
+          // Accumulate the removed path segment (prepending).
+          idSuffix = url.substring(index) + idSuffix;
+
+          // Remove the path segment.
+          // a) foo.org/bar
+          // b) foo.org/bar/
+          // c) http://foo.org
+          // d) http:/
+          url = url.substring(0, index);
+          // a) foo.org
+          // b) foo.org/bar
+          // c) http:/
+          // d) http:
+        }
+      }
+    },
+
     /** @override */
     _createRequire: function() {
       return createRootRequire(this);
+    },
+
+    /** @internal */
+    __indexNode: function(node) {
+      if (DEBUG && this.get(node.id) !== null) {
+        throw new Error("A node with id '" + node.id + "' is already defined.");
+      }
+
+      this.__byId[node.id] = node;
+    },
+
+    /** 
+     * Updates the URL index to account for the change of 
+     * _regular URL_ of a descendant node.
+     * 
+     * Only called for nodes having (or stopping to have) a {@link ChildModuleNode#fixedPath}.
+     * 
+     * @param {ChildModuleNode} childNode - The descendant node.
+     * @param {string?} regularUrlNew - The new regular URL value.
+     * @param {string?} regularUrlOld - The old regular URL value.
+     * @internal
+     * @private
+     * @see ChildModuleNode#url
+     */
+    __onNodeRegularUrlChanged: function(childNode, regularUrlNew, regularUrlOld) {
+      // Don't delete if old regular url is taken by other node.
+      if (regularUrlOld && getOwn(this.__byUrl, regularUrlOld) === childNode) {
+        delete this.__byUrl[regularUrlOld];
+      }
+
+      // Don't add if new regular url is taken by another node.
+      if (regularUrlNew && !getOwn(this.__byUrl, regularUrlNew)) {
+        this.__byUrl[regularUrlNew] = childNode;
+      }
+    },
+
+    /**
+     * Updates the URL index to account for a descendant node having been loaded
+     * and its actual URL becoming known.
+     * 
+     * @param {ChildModuleNode} childNode - The descendant node.
+     * @internal
+     * @private
+     * @see ChildModuleNode#actualUrl
+     */
+    __onNodeActualUrlSet: function(childNode) {
+      // Don't add if actual url is taken by another node (or self).
+      const actualUrl = childNode.actualUrl;
+      if (actualUrl && !getOwn(this.__byUrl, actualUrl)) {
+        this.__byUrl[actualUrl] = childNode;
+      }
     }
   });
   
@@ -1740,6 +2221,11 @@
 
   function composeIds(baseId, childId) {
     return baseId ? (baseId + "/" + childId) : childId;
+  }
+
+  function removeUrlFragment(url) {
+    const index = url.indexOf("#");
+    return index < 0 ? url : url.substring(0, index);
   }
 
   // "/a" - origin relative 
