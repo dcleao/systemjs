@@ -87,13 +87,15 @@
 		assert.equal(System.resolve(id), expectedUrl)
 	}
 
-	function assertUrl(id, expectedUrl) {
-		const resolvedId = System.resolve(id);
+	function assertUrl(resolvedId, expectedUrl) {
 		const node = System.amd.get(resolvedId);
 		
 		assert.ok(node);
-
 		assert.equal(node.url, expectedUrl);
+	}
+
+	function assertCanonicalId(url, expectedId) {
+		assert.equal(System.canonicalIdByUrl(url), expectedId);
 	}
 
 	const baseUrl = "http://127.0.0.1:8080/";
@@ -124,7 +126,13 @@
 		function() {
 			assertUrl("amd-tests/amd-anonymous", baseUrl + "src/temp/tests/amd-anonymous.js");
 			assertUrl("amd-tests/amd-module-dep", baseUrl + "src/temp/tests/amd-module-dep.js");
-			assertUrl("amd-tests-global-alias/amd-anonymous", baseUrl + "src/temp/tests/amd-anonymous.js");
+		},
+		function() {
+			assertCanonicalId(baseUrl + "src/temp/tests/amd-anonymous.js", "amd-tests/amd-anonymous");
+			assertCanonicalId(baseUrl + "src/temp/tests/amd-module-dep.js", "amd-tests/amd-module-dep");
+
+			assertCanonicalId("foo#!cid=a/b/c", "a/b/c");
+			assertCanonicalId("foo", null);
 		}
 	]);
 </script>

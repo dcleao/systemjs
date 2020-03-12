@@ -238,12 +238,12 @@
      * 
      * The canonical identifier would be `g/duu`.
      */
-    resolveInverse: function(url) {
+    canonicalIdByUrl: function(url) {
       // ## SystemJS Common.
-      // 1. ?
+      // 1. What?
       if (!url) {
-        // returning `null` would not help when overriding,
-        // as it will mean no match from lower layer.
+        // Returning `null` would not help when overriding,
+        // as it means "no URL found" from lower layer.
         throw new Error("Argument 'url' is required.");
       }
 
@@ -254,10 +254,10 @@
       }
 
       // ## SystemJS - Import Maps
-      // TODO: Implement resolveInverse for Import Maps URLs.
+      // TODO: Implement canonicalIdByUrl for Import Maps URLs.
 
       // ## SystemJS - AMD
-      return this.amd.getCanonicalIdOf(url);
+      return this.amd.canonicalIdByUrl(url);
     },
 
     /** @override */
@@ -1790,14 +1790,15 @@
      * as it does not affect script "identity" and mapping.
      * 
      * The algorithm proceeds by matching the URL against an index that maps an URL to the id of its module.
-     * It is assumed that a single module can be mapped to any given path.
-     * The index will contain the regular URLs of modules configured with fixed paths.
+     * It is assumed that only one module can be mapped to any given URL.
+     * The URL index will contain the _regular URLs_ of modules configured with fixed paths.
+     * Unlike the "final" url, the regular url doesn't have the automatically
+     * added `.js` extension not the effect of the `urlArgs` configuration property.
      * 
      * Note that, when the URL contains a query (`?`), it may be because:
      * 
-     * 1. of a redirect returned a completely different URL (should match exactly on the index);
-     * 2. when `urlArgs` is defined, the function added it (can add ? or &);
-     * 3. it was already part of the module's `regularUrl`.
+     * 1. when `urlArgs` is defined, the function added it (can add ? or &);
+     * 2. it was already part of the module's `regularUrl`.
      * 
      * Whatever the case, the implemented algorithm removes each part of the URL, 
      * from the end, matching it with the URL index, 
@@ -1817,11 +1818,10 @@
      * Because AMD configuration can be made at anytime,
      * the URL index needs to be invalidated/updated upon changes to 
      * the configuration properties which influence the modules' URL:
-     * `baseUrl`, `urlArgs`, `paths`, `packages` or `bundles`.
+     * `baseUrl`, `paths`, `packages` or `bundles`.
      * 
-     * The `urlArgs` property is a function which allows to dynamically determine additional query string arguments, 
-     * given the (load) module identifier and the normal URL, built from the other configurations.
-     * The result is appended to the normal URL and so cannot break the _regularity_ of built URLs.
+     * The `urlArgs` is expected not to change to `null`, 
+     * after being defined and URLs have been obtained.
      * 
      * @param {string} url - The URL of the module. Assumed normalized.
      * No special cases are tested such as `.` or `..` path segments.
@@ -1829,7 +1829,7 @@
      * @return {string?} The canonical identifier or `null`.
      * @private
      */
-    getCanonicalIdOf: function(url) {
+    canonicalIdByUrl: function(url) {
       
       const STATE_INIT = 0;
       const STATE_NEXT_QUERY_ARG = 1;
@@ -1867,6 +1867,8 @@
             // > No query part.
             state = STATE_FIRST_PATH_SEGMENT;
 
+            // The following assumption becomes invalid if `urlArgs` becomes null 
+            // after URLs have been generated.
           } else if (this.urlArgs && !RE_URL_BLOB.test(url)) {
             // > There is a query part AND `urlArgs` was used.
             // E.g. foo.org/bar.js?a=b&c=d
