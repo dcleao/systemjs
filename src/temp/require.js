@@ -1483,7 +1483,9 @@
         }
       }
 
-      this.eachChild(this.__onBaseUrlChanged);
+      this.eachChild(function(child) {
+        child.__onBaseUrlChanged();
+      });
     },
 
     __invalidateRegularUrl: function() {
@@ -1502,11 +1504,11 @@
 
       // Not "//foo", "/foo" or "http://foo".
       if (!isAbsoluteUrlWeak(url)) {
-        url = (this.root.baseUrl || "./") + url;
+        url = this.root.baseUrl + url;
       }
 
       // Let base implementation apply further URL normalizations and URL mappings via Import Map!
-      return base.resolve(url);
+      return base.resolve.call(this.root._systemJS, url);
     },
 
     /** @override */
@@ -1613,7 +1615,7 @@
      * @type {string?}
      * @private
      */
-    this.__baseUrl = null;
+    this.__baseUrl = "./";
 
     /**
      * A function which receives a module identifier and its URL
@@ -1676,7 +1678,21 @@
     },
 
     set baseUrl(value) {
-      const newValue = value ? ensureTrailingSlash(value) : null;
+      // Normalize `value`.
+      let newValue;
+      if (value) {
+        newValue = ensureTrailingSlash(value);
+
+        if (isBareName(newValue)) {
+          // If left as is, when calling base.resolve with the URL built
+          // in `ChildModuleNode#regularUrl`, 
+          // would give incorrect results or throw.
+          newValue = "./" + newValue;
+        }
+      } else {
+        newValue = "./";
+      }
+      
       if (this.__baseUrl !== newValue) {
         this.__baseUrl = newValue;
 
@@ -1684,7 +1700,6 @@
           child.__onBaseUrlChanged();
         });
       }
-      
     },
 
     get urlArgs() {
@@ -2233,6 +2248,10 @@
   // "http://" - absolute
   function isAbsoluteUrlWeak(text) {
     return !!text && (text[0] === "/" || RE_URL_PROTOCOL.test(text));
+  }
+
+  function isBareName(text) {
+    return !!text && !isAbsoluteUrlWeak(text) && text[0] !== ".";
   }
 
   function parseAmdId(id) {

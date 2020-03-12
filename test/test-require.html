@@ -16,6 +16,21 @@
 	//	document.write()
 </script>
 
+<script src="../node_modules/mocha/mocha.js"></script>
+<script>
+	self.assert = {
+		ok: function (val) {
+			this.equal(!!val, true);
+		},
+		equal: function equal(a, b) {
+			if (a !== b)
+				throw new Error('Expected "' + a + '" to be "' + b + '"');
+		},
+		fail: function (msg) {
+			throw new Error(msg);
+		}
+	};
+</script>
 <script src="../dist/system.js"></script>
 <script src="../dist/extras/named-register.js"></script>
 <script src="../dist/extras/use-default.js"></script>
@@ -66,11 +81,23 @@
 
 		
 	}
-	// Teste 1
 	
-	/*
-	require(["amd-tests/amd-anonymous"], logModule);
-	*/
+	// ---
+	function assertResolve(id, expectedUrl) {
+		assert.equal(System.resolve(id), expectedUrl)
+	}
+
+	function assertUrl(id, expectedUrl) {
+		const resolvedId = System.resolve(id);
+		const node = System.amd.get(resolvedId);
+		
+		assert.ok(node);
+
+		assert.equal(node.url, expectedUrl);
+	}
+
+	const baseUrl = "http://127.0.0.1:8080/";
+
 	doTests([
 		function() {
 			return System.import("amd-tests/amd-anonymous");
@@ -86,6 +113,18 @@
 		},
 		function() {
 			return System.import("amd-tests/amd-bundleA");
+		},
+		function() {
+			assertResolve("amd-tests/amd-anonymous", "amd-tests/amd-anonymous");
+			assertResolve("amd-tests/amd-module-dep", "amd-tests/amd-module-dep");
+			assertResolve("amd-tests-global-alias", "amd-tests");
+			assertResolve("amd-tests-global-alias/amd-anonymous", "amd-tests/amd-anonymous");
+			assertResolve("amd-tests/amd-bundleA", "amd-tests/amd-bundleA");
+		},
+		function() {
+			assertUrl("amd-tests/amd-anonymous", baseUrl + "src/temp/tests/amd-anonymous.js");
+			assertUrl("amd-tests/amd-module-dep", baseUrl + "src/temp/tests/amd-module-dep.js");
+			assertUrl("amd-tests-global-alias/amd-anonymous", baseUrl + "src/temp/tests/amd-anonymous.js");
 		}
 	]);
 </script>
