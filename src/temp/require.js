@@ -109,7 +109,7 @@
        * Queue of AMD definitions added during the load of a script file
        * and which are pending processing.
        * 
-       * Filled in by calling the {@link AmdSystemJS#_queueAmdDef} method.
+       * Filled in by calling the {@link AmdSystemJS#__queueAmdDef} method.
        * 
        * @memberof AmdSystemJS#
        * @type {Array.<({id: string?, deps: string[], execute: function})>}
@@ -289,115 +289,11 @@
         importNode = this.amd.getOrCreate(idInfo.id);
         loadNode = importNode.bundleOrSelf;
 
-        // TODO: if bundle: setFragment(#!cid=<id>)
-        
         loadUrl = loadNode.url;
       }
 
       return Promise.resolve(base.instantiate.call(this, loadUrl, parentUrl))
         .then(this.__instantiateEnd.bind(this, loadUrl, importNode, loadNode));
-    },
-
-    __instantiatePluginCall: function(pluginId, resourceId, parentUrl) {
-
-      // Unfortunately, `pluginId` will be resolved, again.
-      return this.import(pluginId, parentUrl)
-        .then(this.__instantiatePluginCallEnd.bind(this, pluginId, resourceId, parentUrl));
-    },
-
-    __instantiatePluginCallEnd: function(pluginId, resourceId, parentUrl, plugin) {
-
-      let id = pluginId + "!" + (resourceId || "");
-
-      // Determine the identifier of the dependent module (parentUrl), if AMD.
-      let refNode = this.__getOrCreateNodeDetachedByUrl(parentUrl) || this.amd;
-
-      return new Promise(function(resolve, reject) {
-        // TODO: Build overall config for loader plugins
-        let config = {};
-
-        function onLoadCallback(value) {
-          resolve(value);
-        }
-
-        onLoadCallback.error = reject;
-
-        onLoadCallback.fromText = function(text, textAlt) {
-          // TODO: onload.fromText - eval text as if it were a module script being loaded 
-          // assuming its id is resourceId.
-          if (textAlt) {
-            text = textAlt;
-          }
-
-          // eval
-          // define is called..
-        };
-
-        plugin.load(resourceId, refNode.require, onLoadCallback, config);
-      });
-    },
-
-    // Why Canonical Ids for Import Maps
-    // Ids resolved by the import map are also supported.
-    // - Supports the case where an AMD module is loaded via import map and not via AMD config paths.
-    // - In instantiate, if a URL is received, try to unresolve it and obtain the original id.
-    //   If an identifier exists, use it to match found anonymous AMD modules.
-    // - Supports cases where, a non AMD register still needs to know its logical, canonical identifier.
-    //   Can be used for identifier persistence use cases or, less critically, for purposes of obtaining module configurations.
-    //   (rules can be mapped from id to URL, at runtime, and 
-    //    modules can obtain their configuration given their URL / import.meta.url).
-
-    // or the returned module identifier will be that of the bundle itself.
-    // If URL is the result of a previous `resolve` operation, 
-    // looking up the inverse resolutions map immediately yields one or more results...
-    // Otherwise, must go through: `map`, `paths`, `bundles`, `packages`.
-    // Ultimately, if no correspondence is found, null is returned.
-
-    /**
-     * Gets the canonical identifier of a given URL, if one exists; `null`, otherwise.
-     * 
-     * ## Implementation
-     * 
-     * ### URL Index
-     * 
-     * Building a URL index -- which maps each url to a set of module ids -- 
-     * of all past resolutions done via `resolve` would include the inapplicable results of _scoped_ identifiers 
-     * (both for AMD and Import Maps),
-     * as there is no information at this location about the scope of the mapping used to resolve an identifier.
-     * 
-     * To circumvent this, at the cost of performance, 
-     * resolutions with a `parentUrl` could be internally repeated without a `parentUrl`.
-     * If the result was be the same, then it would be due to a global scope mapping,
-     * one which could be registered.
-     * 
-     * However, even if such an index was built,
-     * it would only allow determining the canonical identifiers of _previously resolved_ modules,
-     * and so, the general algorithm which determines the canonical identifier for any given URL
-     * would need to be implemented anyway.
-     * 
-     * There's also the problem of the index growing unboundedly, 
-     * even though that would not be visible for most applications.
-     * 
-     * The possibility to delete or undefine a module may also bring complications to managing the index.
-     * 
-     * Lastly, the HTTP request for a script may be redirected to a different URL.
-     * Yet, AFAIK, SystemJS is not aware of final URLs.
-     * 
-     * =======
-     * 
-     * - urlIndex[regularUrl] = id <-- used for prefix detection
-     * - urlIndex[url       ] = id <-- maybe not needed
-     * 
-     */
-    __getCanonicalIdByUrl: function(url) {
-      // TODO: Implement __getCanonicalIdByUrl
-      
-
-    },
-
-    __getOrCreateNodeDetachedByUrl: function(url) {
-      let id = this.__getCanonicalIdByUrl(url);
-      return id && this.amd.getOrCreateDetached(id);
     },
 
     /** 
@@ -442,6 +338,50 @@
         // J.I.C. this class' implementation of getRegister isn't called.
         this.__forcedGetRegister = undefined;
       }
+    },
+
+    __getOrCreateNodeDetachedByUrl: function(url) {
+      let id = url ? this.canonicalIdByUrl(url) : null;
+      return id && this.amd.getOrCreateDetached(id);
+    },
+    
+    __instantiatePluginCall: function(pluginId, resourceId, parentUrl) {
+
+      // Unfortunately, `pluginId` will be resolved, again.
+      return this.import(pluginId, parentUrl)
+        .then(this.__instantiatePluginCallEnd.bind(this, pluginId, resourceId, parentUrl));
+    },
+
+    __instantiatePluginCallEnd: function(pluginId, resourceId, parentUrl, plugin) {
+
+      let id = pluginId + "!" + (resourceId || "");
+
+      // Determine the identifier of the dependent module (parentUrl), if AMD.
+      let refNode = this.__getOrCreateNodeDetachedByUrl(parentUrl) || this.amd;
+
+      return new Promise(function(resolve, reject) {
+        // TODO: Build overall config for loader plugins
+        let config = {};
+
+        function onLoadCallback(value) {
+          resolve(value);
+        }
+
+        onLoadCallback.error = reject;
+
+        onLoadCallback.fromText = function(text, textAlt) {
+          // TODO: onload.fromText - eval text as if it were a module script being loaded 
+          // assuming its id is resourceId.
+          if (textAlt) {
+            text = textAlt;
+          }
+
+          // eval
+          // define is called..
+        };
+
+        plugin.load(resourceId, refNode.require, onLoadCallback, config);
+      });
     },
 
     // TODO: refactor this documentation...
@@ -510,7 +450,7 @@
      * @protected
      * @internal
      */
-    _queueAmdDef: function(id, deps, execute) {
+    __queueAmdDef: function(id, deps, execute) {
       this.__amdDefQueue.push({id: id, deps: deps, execute: execute});
     },
 
@@ -618,6 +558,7 @@
     __createAmdRegister: function(loadUrl, loadNode, node, depRefs, execute) {
       
       // TODO: When a bundle (node !== loadNode), compose URL with #cid=<node.id>?
+      // TODO: if bundle: setFragment(#!cid=<id>)
       const moduleUrl = loadUrl;
 
       const exports = {};
@@ -2008,7 +1949,7 @@
 
       } // else, `deps` is an array and assuming but not checking that `execute` is a fun...
 
-      rootNode._systemJS._queueAmdDef(id, deps, execute);
+      rootNode._systemJS.__queueAmdDef(id, deps, execute);
     }
   }
 
