@@ -1,3 +1,21 @@
+/*
+ * Copyright 2020 Hitachi Vantara Corporation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+ // Portions of the following code are based on https://github.com/requirejs/requirejs.
+
 (function(global) {
 
   const DEBUG = true;
@@ -16,17 +34,18 @@
 
   let unnormalizedCounter = 1;
 
-  // TODO: Add license header.
+  // TODO: Check license.
   // TODO: Check cycle detection is properly handled
-  // TODO: plugin onload.fromText
   // TODO: Check proper error handling
-  // TODO: plugins, `config` argument ??
-  // TODO: Receive configuration through global requirejs variable (when an object).
-  // TODO: Other environments (Rhino? )
-  // TODO: Review URL Regexps
+  // TODO: Support for other environments (Rhino?).
   // TODO: "Minify" code / identifiers / structure.
-  // TODO: complete doclets
-  // TODO: .JS <> bare interop ?
+  // TODO: Complete/Review documentation
+  // ----
+  // TODO: plugins: onload.fromText
+  // TODO: plugins: config argument
+  // TODO: Receive configuration through global requirejs variable (when an object).
+  // TODO: Review URL Regexps
+  // TODO: .JS <> bare interop?
   // TODO: "__proto__" map lookup loophole
 
   // The following AMD/RequireJS features are not supported:
