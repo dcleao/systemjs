@@ -27,10 +27,12 @@
   }];
   const STAR = "*";
   const RE_JS_EXT = /\.js$/i;
-  const RE_URL_PROTOCOL = /^[\w\+\.\-]+:/i;
+  // Absolute or Protocol Relative or Origin Relative
+  const RE_URL_ABSOLUTE = /^\/|[\w\+\.\-]+:/i;
   const RE_URL_BLOB = /^blob:/i;
   const RE_URL_DATA_OR_BLOB = /^(data|blob):/i;
   const URL_MODULE_FRAGMENT = "#!cid=";
+  const isBrowser = typeof window !== "undefined" && typeof navigator !== "undefined" && !!window.document;
 
   let unnormalizedCounter = 1;
 
@@ -41,10 +43,6 @@
   // TODO: "Minify" code / identifiers / structure.
   // TODO: Complete/Review documentation
   // ----
-  // TODO: plugins: onload.fromText
-  // TODO: plugins: config argument
-  // TODO: Receive configuration through global requirejs variable (when an object).
-  // TODO: Review URL Regexps
   // TODO: .JS <> bare interop?
   // TODO: "__proto__" map lookup loophole
 
@@ -379,7 +377,7 @@
       let refNode = this.__getOrCreateNodeDetachedByUrl(parentUrl) || this.amd;
 
       return new Promise(function(resolve, reject) {
-        // TODO: Build overall config for loader plugins
+        // TODO: plugins: config argument
         let config = {};
 
         function onLoadCallback(value) {
@@ -389,7 +387,7 @@
         onLoadCallback.error = reject;
 
         onLoadCallback.fromText = function(text, textAlt) {
-          // TODO: onload.fromText - eval text as if it were a module script being loaded 
+          // TODO: plugins: onload.fromText - eval text as if it were a module script being loaded 
           // assuming its id is resourceId.
           if (textAlt) {
             text = textAlt;
@@ -809,6 +807,14 @@
      * @abstract
      */
 
+    /** 
+     * @name configure
+     * @memberOf AbstractModuleNode#
+     * @method
+     * @param {object} config - The configuration object.
+     * @virtual
+     */
+
     /**
      * Gets the array of attached child modules, if any; `null` otherwise.
      * 
@@ -949,21 +955,7 @@
           return null;
         }
       } else if (DEBUG) {
-        if (!singleId) {
-          throw new Error("Invalid empty id.");
-        }
-
-        if (singleId === STAR) {
-          throw new Error("Invalid id '" + STAR + "'.");
-        }
-  
-        if (singleId.indexOf("!") >= 0) {
-          throw new Error("Plugin call id not allowed: '" + singleId + "'.");
-        }
-
-        if (isAbsoluteUrlWeak(singleId)) {
-          throw new Error("URL not allowed: '" + singleId + "'.");
-        }
+        this.validateSingle(singleId);
       }
       
       let normalizedId = absolutizeId(singleId, this.parentId);
@@ -982,6 +974,26 @@
       }
 
       return normalizedId;
+    },
+
+    validateSingle: function(singleId) {
+      if (!singleId) {
+        throw new Error("Invalid empty id.");
+      }
+
+      if (singleId === STAR) {
+        throw new Error("Invalid id '" + STAR + "'.");
+      }
+
+      if (singleId.indexOf("!") >= 0) {
+        throw new Error("Plugin call id not allowed: '" + singleId + "'.");
+      }
+
+      if (isAbsoluteUrlWeak(singleId)) {
+        throw new Error("URL not allowed: '" + singleId + "'.");
+      }
+
+      return singleId;
     },
 
     // require(["idOrAbsURL", ...]
@@ -1068,7 +1080,7 @@
     configMap: function(mapSpec) {
 
       Object.keys(mapSpec).forEach(function(aliasId) {
-        this._aliasMap[this.normalizeSingle(aliasId)] = this.normalizeSingle(mapSpec[aliasId]);
+        this._aliasMap[this.validateSingle(aliasId)] = this.validateSingle(mapSpec[aliasId]);
       }, this);
     },
 
@@ -1115,7 +1127,7 @@
     
     // ---
     // Configuration properties.
-    this.config = null;
+    this.__config = null;
 
     // Package main
     this.__main = null;
@@ -1310,6 +1322,19 @@
       }
 
       return this.__cachedPath;
+    },
+
+    get config() {
+      return this.__config;
+    },
+
+    /** @override */
+    configure: function(config) {
+      if (!this.__config) {
+        this.__config = {};
+      }
+
+      mixin(this.__config, config);
     },
 
     configPackage: function(packageSpec) {
@@ -1529,8 +1554,7 @@
     const rootNode = refNode.root;
 
     return objectCopy(require, {
-      // TODO: isBrowser flag
-      isBrowser: true,
+      isBrowser: isBrowser,
 
       toUrl: function(moduleNamePlusExt) {
         // TODO: require.toUrl
@@ -1748,6 +1772,7 @@
       return this.getRelative(normalizedId, true, true);
     },
 
+    /** @override */
     configure: function(config) {
 
       const baseUrl = config.baseUrl;
@@ -1760,48 +1785,47 @@
         this.urlArgs = urlArgs;
       }
       
-      const packages = config.packages;
-      if (packages) {
-        packages.forEach(function(packageSpec) {
-          if (packageSpec) {
-            if (typeof packageSpec === "string") {
-              packageSpec = {name: packageSpec};
+      const root = this;
+
+      function getOrCreateSingle(id) {
+        return root.getOrCreate(root.validateSingle(id));
+      }
+
+      if (config.packages) {
+        config.packages.forEach(function(pkgSpec) {
+          if (pkgSpec) {
+            if (typeof pkgSpec === "string") {
+              pkgSpec = {name: pkgSpec};
             }
 
-            this.getOrCreate(this.normalizeSingle(packageSpec.name))
-              .configPackage(packageSpec);
+            getOrCreateSingle(pkgSpec.name).configPackage(pkgSpec);
           }
-        }, this);
+        });
       }
 
       eachOwn(config.paths, function(pathSpec, id) {
         if (pathSpec) {
-          this.getOrCreate(this.normalizeSingle(id))
-            .configPath(pathSpec);
+          getOrCreateSingle(id).configPath(pathSpec);
         }
-      }, this);
+      });
       
       eachOwn(config.map, function(mapSpec, id) {
         if (mapSpec) {
-          const node = id === STAR
-            ? this
-            : this.getOrCreate(this.normalizeSingle(id));
-          
+          const node = id === STAR ? root : getOrCreateSingle(id);
           node.configMap(mapSpec);
         }
-      }, this);
+      });
 
-      const bundles = config.bundles;
-      if (bundles) {
-        eachOwn(bundles, function(bundleSpec, id) {
-          // Bundle id better be fully normalized...
-          this.getOrCreate(this.normalizeSingle(id))
-            .configBundle(bundleSpec);
-        }, this);
-      }
+      eachOwn(config.bundles, function(bundleSpec, id) {
+        getOrCreateSingle(id).configBundle(bundleSpec);
+      });
 
-      // TODO: config
+      eachOwn(config.config, function(config, id) {
+        getOrCreateSingle(id).configure(config);
+      });
+
       // TODO: shim
+      // TODO: deps, callback
     },
 
     /**
@@ -2112,6 +2136,26 @@
     }
   }
 
+  // Adapted from RequireJS to merge the _config_ configuration option.
+  function mixin(target, source) {
+    eachOwn(source, function(value, prop) {
+      if (!O_HAS_OWN.call(target, prop)) {
+        // Not a null object. Not Array. Not RegExp.
+        if (value && typeof value === "object" && !Array.isArray(value) && !(value instanceof RegExp)) {
+          if (!target[prop]) {
+            target[prop] = {};
+          }
+
+          mixin(target[prop], value);
+        } else {
+          target[prop] = value;
+        }
+      }
+    });
+  
+    return target;
+  }
+
   function objectCopy(to, from) {
     for (const p in from) {
       const desc = Object.getOwnPropertyDescriptor(from, p);
@@ -2251,7 +2295,7 @@
   // "//a" - protocol relative
   // "http://" - absolute
   function isAbsoluteUrlWeak(text) {
-    return !!text && (text[0] === "/" || RE_URL_PROTOCOL.test(text));
+    return !!text && RE_URL_ABSOLUTE.test(text);
   }
 
   function isBareName(text) {
@@ -2293,10 +2337,24 @@
 
     globalSystemJS._initAmd();
 
+    const amd = globalSystemJS.amd;
+
+    // Read configuration, if any.
+    const readConfig = function(cfg) {
+      return cfg != null && typeof cfg !== "function" ? cfg : null;
+    };
+
+    // Capture configuration before overwriting global variables.
+    const config = readConfig(global.require) || readConfig(global.requirejs);
+    
     // Publish in global scope.
     // TODO: Always overwrite define, require? Keep backup?
-    global.define = globalSystemJS.amd.define;
-    global.require = global.requirejs = globalSystemJS.amd.require;
+    global.define = amd.define;
+    global.require = global.requirejs = amd.require;
+
+    if (config) {
+      amd.configure(config);
+    }
   })();
 
 })(typeof self !== 'undefined' ? self : global);
