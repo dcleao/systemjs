@@ -521,6 +521,11 @@
         }
 
         node = this.amd.getOrCreate(fullyNormalizedId);
+
+        // J.I.C. be sure to set the bundle.
+        if (node !== loadNode) {
+          node.bundle = loadNode;
+        }
       } else if (loadNode !== null) {
         node = loadNode;
         fullyNormalizedId = node.id;
@@ -557,14 +562,17 @@
      */
     __createAmdRegister: function(loadUrl, loadNode, node, depRefs, execute) {
       
-      // TODO: When a bundle (node !== loadNode), compose URL with #cid=<node.id>?
-      // TODO: if bundle: setFragment(#!cid=<id>)
-      const moduleUrl = loadUrl;
-
+      // node and loadNode are either both null or both non-null.
+      // So, if they're different, these must be both non-null.
+      // If they're different, then, it should be the case that node.bundle === loadNode
+      // and node.url returns `${loadUrl}#cid=${node.id}`.
+      const moduleUrl = node === loadNode ? loadUrl : node.url;
       const exports = {};
       const module = {
         // TODO: compose <node.id> with .js?
-        // Per RequireJS, when no AMD context, the id of a module is its URL.
+
+        // Per RequireJS, when there is no AMD context, 
+        // the id of a module is its URL.
         id: node ? node.id : moduleUrl,
         uri: moduleUrl,
         config: function() {
@@ -595,7 +603,8 @@
         } else if(depRef === "exports") {
           depValues[i] = exports;
         } else {
-          // TODO: doing full normalization here circumvents resolve not handling parentUrl, yet...
+          // Doing full normalization here, circumvents any possible deficiency of 
+          // the canonicalIdByUrl method, because here, we're sure to use the canonical id.
           registerDepIds.push(refNode.normalizeDep(depRef));
           registerDepSetters.push(createDepSetter(depValues, i));
         }
@@ -1091,6 +1100,8 @@
 
     // Package main
     this.__main = null;
+
+    this.__bundle = null;
     
     // The fixed path, if any.
     this.__fixedPath = null;
@@ -1202,14 +1213,34 @@
     },
 
     /**
+     * Gets or sets this modules's bundle module.
+     * 
+     * @type {ChildModuleNode?}
+     */
+    get bundle() {
+      return this.__bundle;
+    },
+
+    set bundle(value) {
+
+      this.__assertAttached();
+
+      const bundleNew = value || null;
+      if (bundleNew !== this.__bundle) {
+        this.__invalidateRegularUrl(function applyChange() {
+          this.__bundle = bundleNew;
+        });
+      }
+    },
+
+    /**
      * Gets this modules's bundle module, if any; this module, otherwise.
      * 
      * @type {ChildModuleNode}
      * @readonly
      */
     get bundleOrSelf() {
-      // TODO bundleOrSelf
-      return this;
+      return this.__bundle || this;
     },
 
     /**
@@ -1234,29 +1265,12 @@
 
       this.__assertAttached();
 
-      const newValue = value ? removeTrailingSlash(value) : null;
-      
-      // Check if changed.
-      const oldValue = this.__fixedPath;
-      if (oldValue !== newValue) {
-        
-        const regularUrlOld = oldValue && this.regularUrl;
-        
-        // Set.
-        this.__fixedPath = newValue;
-
-        this.__invalidatePath();
-        this.__invalidateRegularUrl();
-
-        const regularUrlNew = newValue && this.regularUrl;
-
-        // If either old or new value are non-null, 
-        // then this node needs to have its regularUrl re-indexed!
-        // Also, only need to re-index if regularUrl actually changed.
-        // If both are null, then they're equal, so the !== test covers both conditions.
-        if (regularUrlNew !== regularUrlOld) {
-          this.root.__onNodeRegularUrlChanged(this, regularUrlNew, regularUrlOld);
-        }
+      const fixedPathNew = value ? removeTrailingSlash(value) : null;
+      if (fixedPathNew !== this.__fixedPath) {
+        this.__invalidateRegularUrl(function applyChange() {
+          this.__fixedPath = fixedPathNew;
+          this.__invalidatePath();
+        });
       }
     },
 
@@ -1297,6 +1311,20 @@
       this.fixedPath = pathSpec;
     },
 
+    configBundle: function(bundleSpec) {
+
+      this.__assertAttached();
+
+      if (bundleSpec) {  
+        const bundleId = this.id;
+        bundleSpec.forEach(function(id) {
+          if (id !== bundleId) {
+            this.getOrCreate(id).bundle = this;
+          }
+        }, this);
+      }
+    },
+
     /**
      * Gets the URL of this module.
      * 
@@ -1328,6 +1356,11 @@
      * @readonly
      */
     get url() {
+      const bundle = this.bundle;
+      if (bundle !== null) {
+        return setUrlFragment(bundle.url, URL_MODULE_FRAGMENT + this.id);
+      }
+
       let url = this.regularUrl;
       if (url !== null) {
         
@@ -1395,34 +1428,60 @@
     // Called when the root node's baseUrl is changed.
     __onBaseUrlChanged: function() {
       
-      // regularUrl cannot be currently indexed if there is no cached value for it.
-      // Also, if the cached value is null, that won't change with baseUrl.
-      const regularUrlOld = this.__cachedUrlRegular;
-      if (regularUrlOld != null) {
-
-        this.__invalidateRegularUrl();
-        
-        // Module is indexed by regularUrl if it has a fixedPath.
-        if (this.fixedPath) {
-          regularUrlNew = this.regularUrl;
-
-          if (regularUrlNew !== regularUrlOld) {
-            this.root.__onNodeRegularUrlChanged(this, regularUrlNew, regularUrlOld);
-          }
-        }
-      }
-
+      this.__invalidateRegularUrl();
+      
       this.eachChild(function(child) {
         child.__onBaseUrlChanged();
       });
     },
 
-    __invalidateRegularUrl: function() {
+    __invalidateRegularUrl: function(applyChange) {
+      // If regular URL was or will be indexed (before and after applyChange).
+      let wasOrWillBeIndexed = this.__isIndexedByRegularUrl;
+
+      // "Cold" value.
+      let regularUrlOld;
+      let regularUrlNew;
+
+      if (wasOrWillBeIndexed) {
+        regularUrlOld = this.__cachedUrlRegular || null;
+      }
+
+      if (applyChange) {
+        applyChange.call(this);
+
+        // Has it become "index by regular URL"?
+        if (!wasOrWillBeIndexed) {
+          wasOrWillBeIndexed = this.__isIndexedByRegularUrl;
+        }
+      }
+
       this.__cachedUrlRegular = undefined;
+
+      if (wasOrWillBeIndexed) {
+        regularUrlNew = this.regularUrl;
+
+        // If either old or new value are non-null, 
+        // then this node needs to have its regularUrl re-indexed!
+        // Also, only need to re-index if regularUrl actually changed.
+        // If both are null, then they're equal, so the !== test covers both conditions.
+        if (regularUrlNew !== regularUrlOld) {
+          this.root.__onNodeRegularUrlChanged(this, regularUrlNew, regularUrlOld);
+        }
+      }
     },
 
-    // ~ on path and baseUrl
+    // Module is indexed by regularUrl only if it has a fixedPath.
+    get __isIndexedByRegularUrl() {
+      return this.fixedPath !== null;
+    },
+
+    // ~ on path, bundle and baseUrl
     __buildRegularUrl: function() {
+      if (this.bundle !== null) {
+        return null;
+      }
+
       // If there is no `path`, there can be no URL.
       const path = this.path;
       if (path === null) {
@@ -1713,9 +1772,17 @@
         }
       }, this);
 
+      const bundles = config.bundles;
+      if (bundles) {
+        eachOwn(bundles, function(bundleSpec, id) {
+          // Bundle id better be fully normalized...
+          this.getOrCreate(this.normalizeSingle(id))
+            .configBundle(bundleSpec);
+        }, this);
+      }
+
       // TODO: config
       // TODO: shim
-      // TODO: bundles
     },
 
     /**
@@ -1963,7 +2030,7 @@
       },
 
       undef: function(id) {
-        // TODO: undef
+        // TODO: root.require.undef
       }
     });
 
@@ -2152,6 +2219,13 @@
   function removeUrlFragment(url) {
     const index = url.indexOf("#");
     return index < 0 ? url : url.substring(0, index);
+  }
+
+  function setUrlFragment(url, fragment) {
+    const index = url.indexOf("#");
+    return index < 0
+      ? (url + fragment)
+      : (url.substring(0, index) + fragment);
   }
 
   // "/a" - origin relative 
