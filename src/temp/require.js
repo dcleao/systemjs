@@ -555,7 +555,7 @@
         throw new Error("Invalid state.");
       }
 
-      let amdRegister = this.__createAmdRegister(loadUrl, loadNode, node, deps, execute);
+      let amdRegister = this.__createAmdRegister(loadUrl, node, deps, execute);
       
       // Need to let `amdRegister` be processed by any subclasses.
       amdRegister = this._processRegister(amdRegister);
@@ -573,33 +573,16 @@
      * Creates a SystemJS register for an AMD (module definition).
      * 
      * @param {string} loadUrl - The URL of the file being loaded.
-     * @param {ChildModuleNode?} loadNode - The AMD child node being laoded, or `null`, if none.
      * @param {ChildModuleNode?} node - The AMD child node of the named module being defined, or `null`, if the module is anonymous.
      * @param {Array.<string>} depRefs - An array of AMD references of the dependencies of the AMD (definition).
      * @param {function} execute - The AMD factory function.
      * @return {Array} A SystemJS register.
      * @private
      */
-    __createAmdRegister: function(loadUrl, loadNode, node, depRefs, execute) {
+    __createAmdRegister: function(loadUrl, node, depRefs, execute) {
       
-      // node and loadNode are either both null or both non-null.
-      // So, if they're different, these must be both non-null.
-      // If they're different, then, it should be the case that node.bundle === loadNode
-      // and node.url returns `${loadUrl}#cid=${node.id}`.
-      const moduleUrl = node === loadNode ? loadUrl : node.url;
-      const exports = {};
-      const module = {
-        // TODO: Compose <node.id> with .js?
-
-        // Per RequireJS, when there is no AMD context, 
-        // the id of a module is its URL.
-        id: node ? node.id : moduleUrl,
-        uri: moduleUrl,
-        config: function() {
-          return (node && node.config) || {};
-        },
-        exports: exports
-      };
+      const module = node ? node.__initAmdModule() : createAmdModule(loadUrl);
+      const exports = module.exports;
 
       // Dependencies which are _not_ AMD special dependencies.
       const registerDepIds = [];
@@ -621,7 +604,7 @@
         } else if(depRef === "module") {
           depValues[i] = module;
         } else if(depRef === "exports") {
-          depValues[i] = exports;
+          depValues[i] = module.exports;
         } else {
           // Doing full normalization here, circumvents any possible deficiency of 
           // the canonicalIdByUrl method, because here, we're sure to use the canonical id.
@@ -1154,6 +1137,9 @@
     // `null` means no fixed path was defined (idem)...
     this.__cachedUrlRegular = undefined;
 
+    // The "module" dependency. Lazily created.
+    this.__amdModule = null;
+
     // ---
 
     if (!isDetached) {
@@ -1447,6 +1433,22 @@
       return this.__cachedUrlRegular;
     },
 
+    get amdModule() {
+      return this.__amdModule;
+    },
+
+    __getOrCreateAmdModule() {
+      return this.__amdModule || this.__initAmdModule();
+    },
+
+    __initAmdModule: function() {
+      if (DEBUG && this.__amdModule) {
+        throw new Error("Invalid State!");
+      }
+
+      return (this.__amdModule = createAmdModule(this));
+    },
+
     __invalidatePath: function() {
       
       this.__cachedPath = undefined;
@@ -1560,10 +1562,30 @@
     }
   });
 
+  /**
+   * DEFINE
+   * ------
+   * node?   - for scripts with an AMD identifier
+   * refNode = node || root - for require and normalize
+   * module  = node ? node.amdModule : createAmdModule()
+   * exports = module.exports
+   * 
+   * require =~ refNode.require
+   * 
+   * REQUIRE
+   * -------
+   * require - always...
+   * node    - always (possibly root)
+   * refNode = node
+   * 
+   * module  =~ node.amdModule  // shared between define and its localRequire
+   * exports =~ module.exports
+   */
   function createRequire(refNode) {
 
     const rootNode = refNode.root;
-
+    
+    // createAmdModule
     return objectCopy(require, {
       isBrowser: isBrowser,
 
@@ -1596,7 +1618,35 @@
     function require(deps, callback, errback) {
       
       if (Array.isArray(deps)) {
+        // Dependencies which are _not_ AMD special dependencies.
+        const registerDepIds = [];
+        const registerDepSetters = [];
+
+        const L = depRefs.length;
+        const depValues = new Array(L);
+        
         // TODO: require asynchronous interface.
+        // Handle special AMD dependencies.
+        // Add setters for other dependencies.
+        for (let i = 0; i < L; i++) {
+          const depRef = deps[i];
+          if(depRef === "require") {
+            // It's important to capture the outer value
+            // for when wrapping is used (e.g. root node).
+            depValues[i] = refNode.require;
+          } else if(depRef === "module") {
+            depValues[i] = refNode.__getOrCreateAmdModule();
+          } else if(depRef === "exports") {
+            depValues[i] = refNode.__getOrCreateAmdModule().exports;
+          } else {
+            // Doing full normalization here, circumvents any possible deficiency of 
+            // the canonicalIdByUrl method, because here, we're sure to use the canonical id.
+            registerDepIds.push(refNode.normalizeDep(depRef));
+            registerDepSetters.push(createDepSetter(depValues, i));
+          }
+        }
+
+
 
         return require;
       }
@@ -1608,6 +1658,38 @@
       // TODO: require sync interface; resolve.
       return rootNode._systemJS.get(id);
     }
+  }
+
+  // when loading a script with no canonical id, node is null.
+  // when creating a module to satisfy 
+  function createAmdModule(loadUrl, node) {
+    const moduleUrl = node ? node.bundleOrSelf.url : loadUrl;
+    let hasExports = false;
+    let exports;
+    const module = {
+      // TODO: Compose <node.id> with .js?
+
+      // Per RequireJS, when there is no AMD context, 
+      // the id of a module is its URL.
+      id: node ? node.id : moduleUrl,
+      uri: moduleUrl,
+      config: function() {
+        return (node && node.config) || {};
+      },
+      get exports() {
+        if (!hasExports) {
+          hasExports = true;
+          exports = {};
+        }
+
+        return exports;
+      },
+      set exports(value) {
+        exports = value;
+      }
+    };
+
+    return module;
   }
   // #endregion
 
