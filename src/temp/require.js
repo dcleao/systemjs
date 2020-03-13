@@ -42,6 +42,8 @@
   // TODO: Support for other environments (Rhino?).
   // TODO: "Minify" code / identifiers / structure.
   // TODO: Complete/Review documentation
+  //       - Document `require` functions.
+  //       - Refactor of documentation__instantiateEnd.
   // ----
   // TODO: .JS <> bare interop?
   // TODO: "__proto__" map lookup loophole
@@ -297,15 +299,17 @@
         // If it's a plugin call, then get the plugin module, first.
         // Then, call its plugin interface with the argument to determine 
         // the composite module (resolvedId).
-        const idInfo = parseAmdId(resolvedId);
-        if (idInfo.isPluginCall) {
-          return this.__instantiatePluginCall(idInfo.id, idInfo.resource, parentUrl);
+        const index = resolvedId.indexOf("!");
+        const isPluginCall = index !== -1;
+        if (isPluginCall) {
+          const pluginId = resolvedId.substring(0, index);
+          const resourceId = resolvedId.substring(index + 1) || null;
+          return this.__instantiatePluginCall(pluginId, resourceId, parentUrl);
         }
 
         // Get or create the AMD node. Must be a child node.
-        importNode = this.amd.getOrCreate(idInfo.id);
+        importNode = this.amd.getOrCreate(resolvedId);
         loadNode = importNode.bundleOrSelf;
-
         loadUrl = loadNode.url;
       }
 
@@ -377,7 +381,7 @@
       let refNode = this.__getOrCreateNodeDetachedByUrl(parentUrl) || this.amd;
 
       return new Promise(function(resolve, reject) {
-        // TODO: plugins: config argument
+        // TODO: Plugins: config argument
         let config = {};
 
         function onLoadCallback(value) {
@@ -387,7 +391,7 @@
         onLoadCallback.error = reject;
 
         onLoadCallback.fromText = function(text, textAlt) {
-          // TODO: plugins: onload.fromText - eval text as if it were a module script being loaded 
+          // TODO: Plugins: onload.fromText - eval text as if it were a module script being loaded 
           // assuming its id is resourceId.
           if (textAlt) {
             text = textAlt;
@@ -401,7 +405,6 @@
       });
     },
 
-    // TODO: refactor this documentation...
     /** 
      * Handles the end phase of instantiation of either a URL or 
      * a _normal_ AMD module (i.e. not a loader plugin module).
@@ -558,7 +561,7 @@
       amdRegister = this._processRegister(amdRegister);
       
       if (fullyNormalizedId !== null) {
-        this.registerRegistry[fullyNormalizedId] = amdRegister;
+        this.__nameRegistry[fullyNormalizedId] = amdRegister;
         return undefined;
       }
 
@@ -586,7 +589,7 @@
       const moduleUrl = node === loadNode ? loadUrl : node.url;
       const exports = {};
       const module = {
-        // TODO: compose <node.id> with .js?
+        // TODO: Compose <node.id> with .js?
 
         // Per RequireJS, when there is no AMD context, 
         // the id of a module is its URL.
@@ -613,7 +616,7 @@
       for (let i = 0; i < L; i++) {
         const depRef = depRefs[i];
         if(depRef === "require") {
-          // TODO: What's the value of "require" for an anonymous define?
+          // TODO: Check "require" dependency of anonymous define.
           depValues[i] = refNode.require;
         } else if(depRef === "module") {
           depValues[i] = module;
@@ -659,7 +662,17 @@
      * @private
      */
     __getByName: function(name) {
-      return getOwn(this.registerRegistry, name) || null;
+      return getOwn(this.__nameRegistry, name) || null;
+    },
+
+    get __nameRegistry() {
+      const register = this.registerRegistry;
+      // Must include extras/named-register.js.
+      if (!register) {
+        throw Error("The named-register.js extra for SystemJS is required.");
+      }
+
+      return register;
     }
   });
   
@@ -906,7 +919,6 @@
         }
       }
 
-      // TODO: integrate with parseAmdId?
       let normalizedId;
       let resourceId = null;
 
@@ -1084,7 +1096,6 @@
       }, this);
     },
 
-    // TODO: document `require` functions.
     /**
      * Gets this node's AMD contextual `require` function.
      * @type {function}
@@ -1225,6 +1236,8 @@
     /**
      * Sets the main module of this module.
      * 
+     * Should be a regular module identifier (without "!").
+     * 
      * @param {string?} relativeId - A relative identifier to the main sub-module of this module.
      * The identifier is considered relative to this module,
      * even when a bare name (without starting with `./`).
@@ -1233,9 +1246,7 @@
      * @see ChildModuleNode#main
      */
     setMain: function(relativeId) {
-      // TODO: "foo/bar/main/.js" ?
-      // TODO: can main be a plugin?
-      
+
       this.__assertAttached();
 
       this.__main = relativeId
@@ -2301,35 +2312,12 @@
   function isBareName(text) {
     return !!text && !isAbsoluteUrlWeak(text) && text[0] !== ".";
   }
-
-  function parseAmdId(id) {
-    const index = id.indexOf("!");
-    if (index >= 0) {
-      return {
-        isPluginCall: true,
-        id: id.substring(0, index),
-        resource: id.substring(index + 1) || null
-      };
-    }
-
-    return {
-      isPluginCall: false,
-      id: id,
-      resource: undefined
-    };
-  }
   // #endregion
 
   (function initGlobal() {
     
     const globalSystemJS = global.System;
 
-    // TODO: Validate existence of registerRegistry lazily, to make this extra script load order independent.
-    // Include extras/named-register.js.
-    if (!globalSystemJS.registerRegistry) {
-      throw Error("Include the named register extra for SystemJS named AMD support.");
-    }
-    
     // Replace the constructor of the only instance of SystemJS, System.
     // This is needed because others have explicitly set a local constructor property on System.
     // Otherwise, the proper value would be inherited via __proto__.
