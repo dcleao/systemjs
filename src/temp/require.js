@@ -47,6 +47,7 @@
   // ----
   // TODO: .JS <> bare interop?
   // TODO: "__proto__" map lookup loophole
+  // TODO: _log
 
   // The following AMD/RequireJS features are not supported:
   // - A dependency ending with ".js" being considered an URL and not a module identifier.
@@ -175,7 +176,7 @@
           throw error;
         }
 
-        const refNode = this.__getOrCreateNodeDetachedByUrl(parentUrl) || this.amd;
+        const refNode = this.__getOrCreateNodeDetachedByUrl(parentUrl);
         const normalizedId = refNode.normalizeDep(depId);
         
         // Throw if normalizedId has no assigned URL (i.e. does not have a defined path or bundle).
@@ -289,7 +290,7 @@
       let loadNode = null;
 
       // If it's still an AMD base identifier, it needs further resolution.
-      if (isBareName(loadUrl)) {
+      if (isBareName(resolvedId)) {
         // Already in the named registry?
         const register = this.__getByName(resolvedId);
         if (register !== null) {
@@ -361,9 +362,18 @@
       }
     },
 
+    // -> AbstractChildModuleNode
     __getOrCreateNodeDetachedByUrl: function(url) {
-      let id = url ? this.canonicalIdByUrl(url) : null;
-      return id && this.amd.getOrCreateDetached(id);
+      if (url == null) {
+        return this.amd;
+      }
+
+      let id = this.canonicalIdByUrl(url);
+      if (id === null) {
+        return new AnonymousChildModuleNode(url, this.amd);
+      }
+
+      return this.amd.getOrCreateDetached(id);
     },
     
     __instantiatePluginCall: function(pluginId, resourceId, parentUrl) {
@@ -377,8 +387,7 @@
 
       let id = pluginId + "!" + (resourceId || "");
 
-      // Determine the identifier of the dependent module (parentUrl), if AMD.
-      let refNode = this.__getOrCreateNodeDetachedByUrl(parentUrl) || this.amd;
+      let refNode = this.__getOrCreateNodeDetachedByUrl(parentUrl);
 
       return new Promise(function(resolve, reject) {
         // TODO: Plugins: config argument
@@ -488,15 +497,23 @@
       
       let amdDef;
       let firstAnonymousRegister = undefined;
+      // let id = url ? this.canonicalIdByUrl(url) : null;
+      if (this.__amdDefQueue.length > 0) {
+        // There's at least one AMD definition.
+        if (loadNode === null) {
+          // -> AMD Module loaded by URL.
+          loadNode = this.__getOrCreateNodeDetachedByUrl(loadUrl);
+        }
 
-      while((amdDef = this.__amdDefQueue.shift()) !== undefined) {
-        const anonymousRegister = this.__processAmdDef(loadUrl, loadNode, amdDef.id, amdDef.deps, amdDef.execute);
-        if (anonymousRegister !== undefined) {
-          if (firstAnonymousRegister === undefined) {
-            firstAnonymousRegister = anonymousRegister;
-          } else {
-            // Second, third, ... anonymous module in a script without AMD context (loadNode).
-            this._log("More than one anonymous AMD module found in a script. Ignoring.", "warn");
+        while((amdDef = this.__amdDefQueue.shift()) !== undefined) {
+          const anonymousRegister = this.__processAmdDef(loadNode, amdDef.id, amdDef.deps, amdDef.execute);
+          if (anonymousRegister !== undefined) {
+            if (firstAnonymousRegister === undefined) {
+              firstAnonymousRegister = anonymousRegister;
+            } else {
+              // Second, third, ... anonymous module in a script without AMD context (loadNode).
+              this._log("More than one anonymous AMD module found in a script. Ignoring.", "warn");
+            }
           }
         }
       }
@@ -507,9 +524,9 @@
     /**
      * Processes an AMD (module definition).
      * 
-     * If `id` is `null` and `loadNode` is not, 
+     * If `id` is `null` and `loadNode.id` is not, 
      * then the identifier is assumed to be that of `loadNode`.
-     * Otherwise, if `id` is `null` and `loadNode` as well,
+     * Otherwise, if `id` is `null` and `loadNode.id` as well,
      * then the AMD module remains anonymous.
      * 
      * A SystemJS register is created.
@@ -517,8 +534,7 @@
      * For named registers are immediately registered in the named register and `undefined` is returned.
      * For unnamed/anonymous registers, the register is returned.
      * 
-     * @param {string} loadUrl - The URL of the file being loaded.
-     * @param {ChildModuleNode?} loadNode - The AMD child node being laoded, or `null`, if none.
+     * @param {ChildModuleNode} loadNode - The AMD child node being loaded.
      * @param {string?} id - The AMD identifier of the AMD (definition).
      * @param {Array.<string>} deps - An array of AMD references of the dependencies of the AMD (definition).
      * @param {function} execute - The AMD factory function.
@@ -526,11 +542,11 @@
      * @return {Array|undefined} The created AMD register, if it remains anonymous; `undefined`, otherwise.
      * @private
      */
-    __processAmdDef: function(loadUrl, loadNode, id, deps, execute) {
+    __processAmdDef: function(loadNode, id, deps, execute) {
       
       // Capture id from loading AMD module, if any.
-      let fullyNormalizedId = null;
-      let node = null;
+      let fullyNormalizedId;
+      let node;
       if (id !== null) {
         // Ensure normalized (assumes normalize is idempotent...)
         fullyNormalizedId = this.amd.normalizeDefined(id);
@@ -546,19 +562,18 @@
         if (node !== loadNode) {
           node.bundle = loadNode;
         }
-      } else if (loadNode !== null) {
+      } else {
         node = loadNode;
+        // May be null!
         fullyNormalizedId = node.id;
       }
 
-      if (DEBUG && node !== null && node.isRoot) {
+      if (DEBUG && node.isRoot) {
         throw new Error("Invalid state.");
       }
 
-      let amdRegister = this.__createAmdRegister(loadUrl, node, deps, execute);
-      
       // Need to let `amdRegister` be processed by any subclasses.
-      amdRegister = this._processRegister(amdRegister);
+      let amdRegister = this._processRegister(createAmdRegister(node, deps, execute));
       
       if (fullyNormalizedId !== null) {
         this.__nameRegistry[fullyNormalizedId] = amdRegister;
@@ -567,74 +582,6 @@
 
       // Anonymous and yet unregistered AMD register.
       return amdRegister;
-    },
-
-    /**
-     * Creates a SystemJS register for an AMD (module definition).
-     * 
-     * @param {string} loadUrl - The URL of the file being loaded.
-     * @param {ChildModuleNode?} node - The AMD child node of the named module being defined, or `null`, if the module is anonymous.
-     * @param {Array.<string>} depRefs - An array of AMD references of the dependencies of the AMD (definition).
-     * @param {function} execute - The AMD factory function.
-     * @return {Array} A SystemJS register.
-     * @private
-     */
-    __createAmdRegister: function(loadUrl, node, depRefs, execute) {
-      
-      const module = node ? node.__initAmdModule() : createAmdModule(loadUrl);
-      const exports = module.exports;
-
-      // Dependencies which are _not_ AMD special dependencies.
-      const registerDepIds = [];
-      const registerDepSetters = [];
-
-      // Process dependencies.
-      const L = depRefs.length;
-      const depValues = new Array(L);
-
-      const refNode = node || this.amd;
-
-      // Handle special AMD dependencies.
-      // Add setters for other dependencies.
-      for (let i = 0; i < L; i++) {
-        const depRef = depRefs[i];
-        if(depRef === "require") {
-          // TODO: Check "require" dependency of anonymous define.
-          depValues[i] = refNode.require;
-        } else if(depRef === "module") {
-          depValues[i] = module;
-        } else if(depRef === "exports") {
-          depValues[i] = module.exports;
-        } else {
-          // Doing full normalization here, circumvents any possible deficiency of 
-          // the canonicalIdByUrl method, because here, we're sure to use the canonical id.
-          registerDepIds.push(refNode.normalizeDep(depRef));
-          registerDepSetters.push(createDepSetter(depValues, i));
-        }
-      }
-
-      return [registerDepIds, declareAmd];
-      
-      function declareAmd(_export, _context) {
-        
-        _export({ default: exports, __useDefault: true });
-
-        return {
-          setters: registerDepSetters,
-          execute: function() {
-            const exported = execute.apply(exports, depValues);
-            if(exported !== undefined) {
-              // Replace exports value.
-              module.exports = exported;
-              _export("default", exported);
-
-            } else if(exports !== module.exports) {
-              // Requested "module" and replaced exports, internally.
-              _export("default", module.exports);
-            }
-          }
-        };
-      }
     },
 
     /**
@@ -658,15 +605,6 @@
       return register;
     }
   });
-  
-  // ---
-
-  function createDepSetter(depValues, depIndex) {
-    return function depSetter(ns) {
-      depValues[depIndex] = resolveUseDefault(ns);
-    };
-  }
-
   // #endregion
 
   // #region AbstractModuleNode Class
@@ -741,16 +679,6 @@
      */
 
     /**
-     * Gets a value that indicates if this module node is detached from the hierarchy.
-     * 
-     * @name isDetached
-     * @memberOf AbstractModuleNode#
-     * @type {boolean}
-     * @readonly
-     * @abstract
-     */
-
-    /**
      * Gets the root module of this module.
      * 
      * The root node returns itself.
@@ -765,12 +693,12 @@
     /**
      * Gets the identifier of this module, if any; `null`, otherwise.
      * 
-     * @name id
-     * @memberOf AbstractModuleNode#
      * @type {string?}
      * @readonly
-     * @abstract
      */
+    get id() {
+      return null;
+    },
 
     /**
      * Gets the parent module of this module, if any; `null`, otherwise.
@@ -796,12 +724,12 @@
      * Gets the name by which this module is known by its parent module, 
      * if any; `null`, otherwise.
      * 
-     * @name name
-     * @memberOf AbstractModuleNode#
      * @type {string?}
      * @readonly
-     * @abstract
      */
+    get name() {
+      return null;
+    },
 
     /** 
      * @name configure
@@ -1079,6 +1007,22 @@
       }, this);
     },
 
+    getDependency: function(depRef, callback) {
+      if (depRef === "require") {
+        return callback(depRef, this.require, true);
+      }
+      
+      if (depRef === "module") {
+        return callback(depRef, this.__getOrCreateAmdModule(), true);
+      }
+      
+      if (depRef === "exports") {
+        return callback(depRef, this.__getOrCreateAmdModule().exports, true);
+      }
+
+      return callback(this.normalizeDep(depRef), undefined, false);
+    },
+
     /**
      * Gets this node's AMD contextual `require` function.
      * @type {function}
@@ -1101,22 +1045,141 @@
 
   // #endregion
 
-  // #region ChildModuleNode Class
-  function ChildModuleNode(name, parent, isDetached) {
+  // #region AbstractChildModuleNode Class
+  function AbstractChildModuleNode(parent, aliasMap) {
+    
+    AbstractModuleNode.call(this, aliasMap);
 
-    if (DEBUG && (!parent || !name)) {
+    this.__parent = parent;
+    this.__root = parent.root;
+
+    // The "module" dependency. Lazily created.
+    this.__amdModule = null;
+  }
+
+  classExtend(AbstractChildModuleNode, AbstractModuleNode, /** @lends AbstractChildModuleNode# */{
+    /** @override */
+    get isRoot() {
+      return false;
+    },
+
+    /** @override */
+    get root() {
+      return this.__root;
+    },
+
+    /** @override */
+    get parent() {
+      return this.__parent;
+    },
+
+    /** @override */
+    get parentId() {
+      return this.__parent !== null ? this.__parent.id : null;
+    },
+
+    get amdModule() {
+      return this.__amdModule;
+    },
+
+    /**
+     * Gets a value that indicates if this module node is detached from the hierarchy.
+     * 
+     * @name isDetached
+     * @memberOf AbstractChildModuleNode#
+     * @type {boolean}
+     * @readonly
+     * @abstract
+     */
+
+    /**
+     * Gets the URL of this module.
+     * 
+     * @name url
+     * @memberof AbstractChildModuleNode#
+     * @type {string?}
+     * @readonly
+     * @abstract
+     */
+
+    /**
+     * Gets the configuration of this node, if any; `null`, otherwise.
+     * 
+     * @name config
+     * @memberOf AbstractChildModuleNode#
+     * @type {object?}
+     * @readonly
+     * @abstract
+     */
+
+    __getOrCreateAmdModule() {
+      return this.__amdModule || this.__initAmdModule();
+    },
+
+    __initAmdModule: function() {
+      if (DEBUG && this.__amdModule) {
+        throw new Error("Invalid State!");
+      }
+
+      return (this.__amdModule = createAmdModule(this));
+    },
+
+    __assertAttached: function() {
+      if (this.isDetached) {
+        throw new Error("Operation invalid on dettached module nodes.");
+      }
+    },
+
+    /** @override */
+    _createRequire: function() {
+      return createRequire(this);
+    }
+  });
+  // #endregion
+
+  // #region AnonymousChildModuleNode Class
+  function AnonymousChildModuleNode(url, parent) {
+
+    if (DEBUG && !(url || parent || !parent.isRoot)) {
       throw new Error("Invalid arguments.");
     }
 
+    AbstractChildModuleNode.call(this, parent, parent._aliasMap);
+
+    this.__url = url;
+  }
+
+  classExtend(AnonymousChildModuleNode, AbstractChildModuleNode, /** @lends AnonymousChildModuleNode# */{
+    /** @override */
+    get isDetached() {
+      return true;
+    },
+
+    /** @override */
+    get url() {
+      return this.__url;
+    },
+
+    /** @override */
+    get config() {
+      return null;
+    }
+  });
+  // #endregion
+  
+  // #region ChildModuleNode Class
+  function ChildModuleNode(name, parent, isDetached) {
+
+    if (DEBUG && !(name || parent)) {
+      throw new Error("Invalid arguments.");
+    }
     // When detached, no new configurations can be made, so reuse the parent's alias map.
     const aliasMap = isDetached ? parent._aliasMap : Object.create(parent._aliasMap);
 
-    AbstractModuleNode.call(this, aliasMap);
+    AbstractChildModuleNode.call(this, parent, aliasMap);
 
     this.__id = composeIds(parent.id, name);
     this.__name = name;
-    this.__parent = parent;
-    this.__root = parent.root;
     this.__isDetached = !!isDetached;
     
     // ---
@@ -1137,9 +1200,6 @@
     // `null` means no fixed path was defined (idem)...
     this.__cachedUrlRegular = undefined;
 
-    // The "module" dependency. Lazily created.
-    this.__amdModule = null;
-
     // ---
 
     if (!isDetached) {
@@ -1148,26 +1208,10 @@
     }
   }
 
-  classExtend(ChildModuleNode, AbstractModuleNode, {
-    /** @override */
-    get isRoot() {
-      return false;
-    },
-
-    /** @override */
-    get root() {
-      return this.__root;
-    },
-
+  classExtend(ChildModuleNode, AbstractChildModuleNode, /** @lends ChildModuleNode# */{
     /** @override */
     get isDetached() {
       return this.__isDetached;
-    },
-
-    __assertAttached: function() {
-      if (this.isDetached) {
-        throw new Error("Operation invalid on dettached module nodes.");
-      }
     },
 
     /** @override */
@@ -1176,29 +1220,8 @@
     },
 
     /** @override */
-    get parent() {
-      return this.__parent;
-    },
-
-    /** @override */
-    get parentId() {
-      return this.__parent !== null ? this.__parent.id : null;
-    },
-
-    /** @override */
     get name() {
       return this.__name;
-    },
-
-    /**
-     * Gets this modules's main module, 
-     * when this module is an AMD package; this module, otherwise.
-     * 
-     * @type {ChildModuleNode}
-     * @readonly
-     */
-    get mainOrSelf() {
-      return this.__main || this;
     },
 
     /**
@@ -1217,6 +1240,17 @@
      */
     get main() {
       return this.__main;
+    },
+
+    /**
+     * Gets this modules's main module, 
+     * when this module is an AMD package; this module, otherwise.
+     * 
+     * @type {ChildModuleNode}
+     * @readonly
+     */
+    get mainOrSelf() {
+      return this.__main || this;
     },
 
     /**
@@ -1395,6 +1429,7 @@
      * 
      * @type {string?}
      * @readonly
+     * @override
      */
     get url() {
       const bundle = this.bundle;
@@ -1431,22 +1466,6 @@
       }
 
       return this.__cachedUrlRegular;
-    },
-
-    get amdModule() {
-      return this.__amdModule;
-    },
-
-    __getOrCreateAmdModule() {
-      return this.__amdModule || this.__initAmdModule();
-    },
-
-    __initAmdModule: function() {
-      if (DEBUG && this.__amdModule) {
-        throw new Error("Invalid State!");
-      }
-
-      return (this.__amdModule = createAmdModule(this));
     },
 
     __invalidatePath: function() {
@@ -1554,143 +1573,8 @@
 
       // Let base implementation apply further URL normalizations and URL mappings via Import Map!
       return base.resolve.call(this.root._systemJS, url);
-    },
-
-    /** @override */
-    _createRequire: function() {
-      return createRequire(this);
     }
   });
-
-  /**
-   * DEFINE
-   * ------
-   * node?   - for scripts with an AMD identifier
-   * refNode = node || root - for require and normalize
-   * module  = node ? node.amdModule : createAmdModule()
-   * exports = module.exports
-   * 
-   * require =~ refNode.require
-   * 
-   * REQUIRE
-   * -------
-   * require - always...
-   * node    - always (possibly root)
-   * refNode = node
-   * 
-   * module  =~ node.amdModule  // shared between define and its localRequire
-   * exports =~ module.exports
-   */
-  function createRequire(refNode) {
-
-    const rootNode = refNode.root;
-    
-    // createAmdModule
-    return objectCopy(require, {
-      isBrowser: isBrowser,
-
-      toUrl: function(moduleNamePlusExt) {
-        // TODO: require.toUrl
-      },
-
-      // As soon as the exports object is created and
-      // the module is loading or has been loaded.
-      defined: function(id) {
-        // TODO: require.defined
-      },
-
-      // There is an attached node for it?
-      // 1. Normalize id.
-      //    1.1. If there is a plugin in it:
-      //      1.1.1. If the plugin is loaded and has a normalize method then use it to normalize resource name.
-      //      1.1.2. If the resource name has no "!" then normalize resource name normally.
-      //      1.1.3. Else, do not normalize name.
-      //    1.2. Else, normalize id normally.
-      // 2. Apply mapping to id.
-      specified: function(id) {
-        // TODO: require.specified
-        // return rootNode.get(refNode.normalize(id)) !== null;
-      }
-    });
-
-    // ---
-
-    function require(deps, callback, errback) {
-      
-      if (Array.isArray(deps)) {
-        // Dependencies which are _not_ AMD special dependencies.
-        const registerDepIds = [];
-        const registerDepSetters = [];
-
-        const L = depRefs.length;
-        const depValues = new Array(L);
-        
-        // TODO: require asynchronous interface.
-        // Handle special AMD dependencies.
-        // Add setters for other dependencies.
-        for (let i = 0; i < L; i++) {
-          const depRef = deps[i];
-          if(depRef === "require") {
-            // It's important to capture the outer value
-            // for when wrapping is used (e.g. root node).
-            depValues[i] = refNode.require;
-          } else if(depRef === "module") {
-            depValues[i] = refNode.__getOrCreateAmdModule();
-          } else if(depRef === "exports") {
-            depValues[i] = refNode.__getOrCreateAmdModule().exports;
-          } else {
-            // Doing full normalization here, circumvents any possible deficiency of 
-            // the canonicalIdByUrl method, because here, we're sure to use the canonical id.
-            registerDepIds.push(refNode.normalizeDep(depRef));
-            registerDepSetters.push(createDepSetter(depValues, i));
-          }
-        }
-
-
-
-        return require;
-      }
-  
-      // Synchronous interface. 
-      // TODO: require sync interface; throw if not loaded yet.
-      const id = deps;
-
-      // TODO: require sync interface; resolve.
-      return rootNode._systemJS.get(id);
-    }
-  }
-
-  // when loading a script with no canonical id, node is null.
-  // when creating a module to satisfy 
-  function createAmdModule(loadUrl, node) {
-    const moduleUrl = node ? node.bundleOrSelf.url : loadUrl;
-    let hasExports = false;
-    let exports;
-    const module = {
-      // TODO: Compose <node.id> with .js?
-
-      // Per RequireJS, when there is no AMD context, 
-      // the id of a module is its URL.
-      id: node ? node.id : moduleUrl,
-      uri: moduleUrl,
-      config: function() {
-        return (node && node.config) || {};
-      },
-      get exports() {
-        if (!hasExports) {
-          hasExports = true;
-          exports = {};
-        }
-
-        return exports;
-      },
-      set exports(value) {
-        exports = value;
-      }
-    };
-
-    return module;
-  }
   // #endregion
 
   // #region RootModuleNode Class
@@ -1761,7 +1645,7 @@
 
   const baseGetRelative = AbstractModuleNode.prototype.getRelative;
 
-  classExtend(RootModuleNode, AbstractModuleNode, {
+  classExtend(RootModuleNode, AbstractModuleNode, /** @lends RootModuleNode# */{
     /** @override */
     get isRoot() {
       return true;
@@ -1778,22 +1662,12 @@
     },
 
     /** @override */
-    get id() {
-      return null;
-    },
-
-    /** @override */
     get parent() {
       return null;
     },
 
     /** @override */
     get parentId() {
-      return null;
-    },
-
-    /** @override */
-    get name() {
       return null;
     },
 
@@ -2116,7 +1990,9 @@
     }
   });
   
-  // ---
+  // #endregion
+
+  // #region Amd and SystemJS stuff
 
   function createDefine(rootNode) {
 
@@ -2156,6 +2032,92 @@
     }
   }
 
+  function createRequire(node) {
+
+    const rootNode = node.root;
+    const systemJS = rootNode._systemJS;
+    
+    return objectCopy(require, {
+      isBrowser: isBrowser,
+
+      toUrl: function(moduleNamePlusExt) {
+        // TODO: require.toUrl
+      },
+
+      // As soon as the exports object is created and
+      // the module is loading or has been loaded.
+      defined: function(id) {
+        // TODO: require.defined
+      },
+
+      // There is an attached node for it?
+      // 1. Normalize id.
+      //    1.1. If there is a plugin in it:
+      //      1.1.1. If the plugin is loaded and has a normalize method then use it to normalize resource name.
+      //      1.1.2. If the resource name has no "!" then normalize resource name normally.
+      //      1.1.3. Else, do not normalize name.
+      //    1.2. Else, normalize id normally.
+      // 2. Apply mapping to id.
+      specified: function(id) {
+        // TODO: require.specified
+      }
+    });
+
+    // ---
+
+    function require(depRefs, callback, errback) {
+      return Array.isArray(depRefs)
+        ? requireManyAsync(depRefs, callback, errback)
+        : requireOneSync(depRefs);
+    }
+
+    function requireManyAsync(depRefs, callback, errback) {
+
+      // For dependencies which are _not_ AMD special dependencies.
+      const registerPromises = [];
+
+      const L = depRefs.length;
+      const depValues = new Array(L);
+      
+      for (let i = 0; i < L; i++) {
+        node.getDependency(depRefs[i], function(normalizedDepRef, value, hasDep) {
+          if (hasDep) {
+            depValues[i] = value;
+          } else {
+            const promise = systemJS.import(normalizedDepRef)
+              .then(createDepSetter(depValues, i));
+  
+            registerPromises.push(promise);
+          }
+        });
+      }
+
+      Promise
+        .all(registerPromises)
+        .then(function() {
+          callback.apply(null, depValues);
+        }, errback);
+
+      return require;
+    }
+
+    function requireOneSync(depRef) {
+
+      return node.getDependency(depRef, function(normalizedDepRef, value, hasDep) {
+        if (hasDep) {
+          return value;
+        }
+
+        const resolvedDepId = systemJS.resolve(normalizedDepRef);
+        if (systemJS.has(resolvedDepId)) {
+          return resolveUseDefault(systemJS.get(resolvedDepId));
+        }
+        
+        throw new Error("Dependency '" + normalizedDepRef + "' isn't loaded yet.");
+      });
+    }
+  }
+
   function createRootRequire(rootNode) {
 
     const baseRequire = createRequire(rootNode);
@@ -2178,6 +2140,7 @@
         
         // require({}, [], function)
         // require({}, [], function, function)
+        // require({})
         // require({}, function)
         // require({}, function, function)
 
@@ -2193,8 +2156,10 @@
 
           callback = errback;
           errback = optional;
-        } else {
+        } else if (callback) {
           deps = [];
+        } else {
+          return rootRequire;
         }
       }
       // else
@@ -2207,6 +2172,102 @@
     }
   }
 
+  // when loading a script with no canonical id, node is null.
+  // when creating a module to satisfy 
+  function createAmdModule(loadUrl, node) {
+    const moduleUrl = node ? node.bundleOrSelf.url : loadUrl;
+    let hasExports = false;
+    let exports;
+    const module = {
+      // TODO: Compose <node.id> with .js?
+
+      // Per RequireJS, when there is no AMD context, 
+      // the id of a module is its URL.
+      id: node ? node.id : moduleUrl,
+      uri: moduleUrl,
+      config: function() {
+        return (node && node.config) || {};
+      },
+      get exports() {
+        if (!hasExports) {
+          hasExports = true;
+          exports = {};
+        }
+
+        return exports;
+      },
+      set exports(value) {
+        exports = value;
+      }
+    };
+
+    return module;
+  }
+
+  /**
+   * Creates a SystemJS register for an AMD (module definition).
+   * 
+   * @param {AbstractChildModuleNode} node - The AMD child node of the module being defined.
+   * @param {Array.<string>} depRefs - An array of AMD references of the dependencies of the AMD (definition).
+   * @param {function} execute - The AMD factory function.
+   * @return {Array} A SystemJS register.
+   * @private
+   */
+  function createAmdRegister(node, depRefs, execute) {
+    
+    const module = node.__initAmdModule();
+    const exports = module.exports;
+
+    // Dependencies which are _not_ AMD special dependencies.
+    const registerDepIds = [];
+    const registerDepSetters = [];
+
+    // Process dependencies.
+    const L = depRefs.length;
+    const depValues = new Array(L);
+
+    // Handle special AMD dependencies.
+    // Add setters for other dependencies.
+    for (let i = 0; i < L; i++) {
+      node.getDependency(depRefs[i], function(depRef, value, hasDep) {
+        if (hasDep) {
+          depValues[i] = value;
+        } else {
+          registerDepIds.push(depRef);
+          registerDepSetters.push(createDepSetter(depValues, i));
+        }
+      });
+    }
+
+    return [registerDepIds, declareAmd];
+    
+    function declareAmd(_export, _context) {
+      
+      _export({ default: exports, __useDefault: true });
+
+      return {
+        setters: registerDepSetters,
+        execute: function() {
+          const exported = execute.apply(exports, depValues);
+          if(exported !== undefined) {
+            // Replace exports value.
+            module.exports = exported;
+            _export("default", exported);
+
+          } else if(exports !== module.exports) {
+            // Requested "module" and replaced exports, internally.
+            _export("default", module.exports);
+          }
+        }
+      };
+    }
+  }
+  
+  function createDepSetter(depValues, depIndex) {
+    return function depSetter(ns) {
+      depValues[depIndex] = resolveUseDefault(ns);
+    };
+  }
   // #endregion
 
   // #region Utilities

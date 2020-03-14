@@ -78,8 +78,6 @@
 				nextTest();
 			}
 		});
-
-		
 	}
 	
 	// ---
@@ -133,6 +131,34 @@
 
 			assertCanonicalId("foo#!cid=a/b/c", "a/b/c");
 			assertCanonicalId("foo", null);
+		},
+		function() {
+			return new Promise(function(resolve, reject) {
+				System.amd.require([
+					"amd-tests/amd-anonymous",
+					"amd-tests/amd-module-dep"
+				], function(anonymous, dep) {
+					
+					assert.ok(/^amd-anonymous:/.test(anonymous));
+					assert.ok(/^amd-module-dep:/.test(dep));
+					
+					resolve();
+				}, reject);
+			});
+		},
+		function() {
+			return new Promise(function(resolve, reject) {
+				System.amd.require([
+					"amd-tests/amd-anonymous",
+					"amd-tests/amd-module-dep"
+				], function(anonymous, dep) {
+					
+					assert.equal(System.amd.require("amd-tests/amd-anonymous"), anonymous);
+					assert.equal(System.amd.require("amd-tests/amd-module-dep"), dep);
+					
+					resolve();
+				}, reject);
+			});
 		}
 	]);
 </script>
