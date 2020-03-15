@@ -213,9 +213,14 @@
 
   function SystemJS () {
     this[REGISTRY] = {};
+
+    this._init();
   }
 
   const systemJSPrototype = SystemJS.prototype;
+
+  // Allows extras to initialize a SystemJS instance.
+  systemJSPrototype._init = function() {};
 
   systemJSPrototype.prepareImport = function () {};
 
@@ -483,6 +488,8 @@
     }
   }
 
+  // To complete the initialization of the global System instance, 
+  // each extra should init only its part, because its `_init` method aas called before any extras were installed.
   envGlobal.System = new SystemJS();
 
   /*

@@ -6,22 +6,18 @@
  * System.register('x', ...) can be imported as System.import('x')
  */
 (function (global) {
-  const System = global.System;
-  setRegisterRegistry(System);
-  const systemJSPrototype = System.constructor.prototype;
-  const constructor = System.constructor;
-  const SystemJS = function () {
-    constructor.call(this);
-    setRegisterRegistry(this);
-  };
-  SystemJS.prototype = systemJSPrototype;
-  System.constructor = SystemJS;
-
   let firstNamedDefine;
 
-  function setRegisterRegistry(systemInstance) {
-    systemInstance.registerRegistry = Object.create(null);
-  }
+  const System = global.System;
+  setRegisterRegistry(System);
+
+  const systemJSPrototype = System.constructor.prototype;
+  
+  const baseInit = systemJSPrototype._init;
+  systemJSPrototype._init = function() {
+    baseInit.call(this);
+    setRegisterRegistry(this);
+  };
 
   const register = systemJSPrototype.register;
   systemJSPrototype.register = function (name, deps, declare) {
@@ -71,4 +67,9 @@
     firstNamedDefine = null;
     return result;
   }
+
+  function setRegisterRegistry(systemInstance) {
+    systemInstance.registerRegistry = Object.create(null);
+  }
+  
 })(typeof self !== 'undefined' ? self : global);
