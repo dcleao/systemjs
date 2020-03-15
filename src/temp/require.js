@@ -50,7 +50,7 @@
   //
   // General Features
   // ----
-  // TODO: Plugins, _unnormalized ids
+  // TODO: Plugins, _unnormalized ids ***
   // TODO: .JS <> bare interop? *** 
   //       Compose <node.id> with .js?
   // TODO: trimDots -> absolutizeId ***
@@ -74,6 +74,9 @@
   // Loader Plugins
   // --------------
   // TODO: config argument ***
+  //       what needs to be done to maintain config on pair and will it then
+  //       subsume the use of nodes?? Requirejs derives bundleMap and pkgs index properties
+  //       from the config.
   // TODO: onload.fromText *** - eval text as if it were a module script being loaded  
   //       assuming its id is resourceId.
   //
@@ -82,19 +85,33 @@
   // TODO: _log
   // TODO: "__proto__" map lookup loophole
 
-  // The following AMD/RequireJS features are not supported:
+  // Not Supported
+  //
+  // AMD
+  // ---
+  // https://github.com/amdjs/amdjs-api
+  //
+  // - Modules with paths/URLs with fragments, as they're used for other purposes.
   // - A dependency ending with ".js" being considered an URL and not a module identifier.
   //   - The top-level require's `jsExtRegExp` property; used to filter out dependencies that are already URLs.
-  // - Being able to `map` an ("normal") identifier to a loader plugin call identifier.
+  // - Being able to `map` a regular identifier to a loader plugin call identifier.
   // - Being able to specify `paths` fallbacks; when an array is provided, only the first value is considered.
+  //
+  // RequireJS
+  // ---------
+  // https://requirejs.org
+  //
+  // - CommonJS-style factory: detection of `require(.)` dependencies in factory function code, using `toString`.
+  // - require.defined/specified ? Are these worth it?
+  // - require.onError, require.createNode, require.load
+  // - error.requireModules on error handlers allowing to undef and then retry loading of modules with different config/paths,
+  //   allowing functionality equivalent to paths fallbacks
+  //   (https://requirejs.org/docs/api.html#errbacks)
+  // - config.nodeRequire / all special NodeJS/CommonJS features
+  // - Environments such as: PSn, Opera...
   // - Creating new require contexts.
   // - Specifying `data-main` in the `script` element used to load the AMD/RequireJS extra;
   //   the `skipDataMain` configuration property is also not supported.
-  // - Environments such as: PSn, Opera...
-  // - CommonJS-style factory: detection of `require(.)` dependencies in factory function code, using `toString`.
-  // - require.onError, require.createNode, require.load
-  // - config.nodeRequire / all special NodeJS/CommonJS features
-  // - require.defined/specified ? Are these worth it?
 
   // ---
 
