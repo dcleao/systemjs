@@ -47,7 +47,8 @@
   //       - Document `require` functions.
   //       - Refactor of documentation__instantiateEnd.
   // TODO: Unit tests...
-  //
+  // TODO: Check loading order of dependency extras
+  // 
   // General Features
   // ----
   // TODO: Plugins, _unnormalized ids ***
@@ -62,7 +63,9 @@
   // Config
   // ------
   // TODO: config.shim ***
+  //       Any integration with global.js?
   // TODO: config.deps, config.callback (using setTimout to let any following extras to be installed)
+  //       relationship with data-main and `<script type="systemjs-module" src="import:name"></script>`
   // 
   // Require
   // -------
@@ -112,6 +115,7 @@
   // - Creating new require contexts.
   // - Specifying `data-main` in the `script` element used to load the AMD/RequireJS extra;
   //   the `skipDataMain` configuration property is also not supported.
+  //   -> It's equivalent to add <script type="systemjs-module" src="import:name"></script>
 
   // ---
 
@@ -155,17 +159,17 @@
 
     SystemJS.call(this);
     
-    this._initAmd();
+    this._init();
   }
   
-  classExtendHijack(AmdSystemJS, SystemJS, /** @lends AmdSystemJS# */{
+  classExtendMixin(AmdSystemJS, SystemJS, /** @lends AmdSystemJS# */{
 
     /**
      * Initializes the AMD aspects of this instance.
      * 
      * @protected
      */
-    _initAmd: function() {
+    _init: function() {
       /**
        * Gets the root node of the AMD module's namespace.
        * 
@@ -2417,7 +2421,7 @@
 
   // Replace SystemJS with the locally declared AmdSystemJS.
   // Hijack its prototype and use it for AmdSystemJS.
-  function classExtendHijack(Sub, Base, subSpec) {
+  function classExtendMixin(Sub, Base, subSpec) {
 
     const basePrototype = Base.prototype;
     
@@ -2527,7 +2531,7 @@
     // Otherwise, the proper value would be inherited via __proto__.
     globalSystemJS.constructor = AmdSystemJS;
 
-    globalSystemJS._initAmd();
+    globalSystemJS._init();
 
     const amd = globalSystemJS.amd;
 
