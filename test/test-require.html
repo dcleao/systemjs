@@ -81,15 +81,14 @@
 	}
 	
 	// ---
-	function assertResolve(id, expectedUrl) {
-		assert.equal(System.resolve(id), expectedUrl)
+	function assertNormalize(id, expectedUrl) {
+		assert.equal(System.amd.normalizeDep(id), expectedUrl)
 	}
 
-	function assertUrl(resolvedId, expectedUrl) {
-		const node = System.amd.get(resolvedId);
+	function assertResolve(id, expectedUrl) {
+		const url = System.resolve(id);
 		
-		assert.ok(node);
-		assert.equal(node.url, expectedUrl);
+		assert.equal(url, expectedUrl);
 	}
 
 	function assertCanonicalId(url, expectedId) {
@@ -115,21 +114,22 @@
 			return System.import("amd-tests/amd-bundleA");
 		},
 		function() {
-			assertResolve("amd-tests/amd-anonymous", "amd-tests/amd-anonymous");
-			assertResolve("amd-tests/amd-module-dep", "amd-tests/amd-module-dep");
-			assertResolve("amd-tests-global-alias", "amd-tests");
-			assertResolve("amd-tests-global-alias/amd-anonymous", "amd-tests/amd-anonymous");
-			assertResolve("amd-tests/amd-bundleA", "amd-tests/amd-bundleA");
+			assertNormalize("amd-tests/amd-anonymous", "amd-tests/amd-anonymous");
+			assertNormalize("amd-tests/amd-module-dep", "amd-tests/amd-module-dep");
+			assertNormalize("amd-tests-global-alias", "amd-tests");
+			assertNormalize("amd-tests-global-alias/amd-anonymous", "amd-tests/amd-anonymous");
+			assertNormalize("amd-tests/amd-bundleA", "amd-tests/amd-bundleA");
 		},
 		function() {
-			assertUrl("amd-tests/amd-anonymous", baseUrl + "src/temp/tests/amd-anonymous.js");
-			assertUrl("amd-tests/amd-module-dep", baseUrl + "src/temp/tests/amd-module-dep.js");
+			assertResolve("amd-tests/amd-anonymous", baseUrl + "src/temp/tests/amd-anonymous.js#!mid=amd-tests/amd-anonymous");
+			assertResolve("amd-tests/amd-module-dep", baseUrl + "src/temp/tests/amd-module-dep.js#!mid=amd-tests/amd-module-dep");
+			assertResolve("amd-tests-global-alias/amd-anonymous", baseUrl + "src/temp/tests/amd-anonymous.js#!mid=amd-tests/amd-anonymous");
 		},
 		function() {
 			assertCanonicalId(baseUrl + "src/temp/tests/amd-anonymous.js", "amd-tests/amd-anonymous");
 			assertCanonicalId(baseUrl + "src/temp/tests/amd-module-dep.js", "amd-tests/amd-module-dep");
 
-			assertCanonicalId("foo#!cid=a/b/c", "a/b/c");
+			assertCanonicalId("foo#!mid=a/b/c", "a/b/c");
 			assertCanonicalId("foo", null);
 		},
 		function() {
