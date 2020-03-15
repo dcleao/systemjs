@@ -9,13 +9,11 @@
   var System = global.System;
   setRegisterRegistry(System);
   var systemJSPrototype = System.constructor.prototype;
-  var constructor = System.constructor;
-  var SystemJS = function () {
-    constructor.call(this);
+  var baseInit = systemJSPrototype._init;
+  systemJSPrototype._init = function() {
+    baseInit.call(this);
     setRegisterRegistry(this);
   };
-  SystemJS.prototype = systemJSPrototype;
-  System.constructor = SystemJS;
 
   var firstNamedDefine;
 
@@ -71,4 +69,5 @@
     firstNamedDefine = null;
     return result;
   }
+  
 })(typeof self !== 'undefined' ? self : global);

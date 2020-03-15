@@ -23,9 +23,20 @@ var REGISTRY = hasSymbol ? Symbol() : '@';
 
 function SystemJS () {
   this[REGISTRY] = {};
+
+  this._init();
 }
 
 var systemJSPrototype = SystemJS.prototype;
+
+
+// Allows extras to initialize new SystemJS instances
+// without having to override the constructor.
+// Still, to complete the initialization of the *global* System instance,
+// each extra must explicitly initialize only its part.
+// This is because the *global* instance's `_init` method is called before any extras are installed.
+// See named-register.js for an example.
+systemJSPrototype._init = function() {};
 
 systemJSPrototype.import = function (id, parentUrl) {
   var loader = this;
