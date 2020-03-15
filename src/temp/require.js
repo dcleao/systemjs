@@ -85,7 +85,7 @@
   //
   // JS
   // ---
-  // TODO: _log
+  // TODO: __log
   // TODO: "__proto__" map lookup loophole
 
   // Not Supported
@@ -132,17 +132,18 @@
   // #region AmdSystemJS class
 
   // A copy of the methods of the SystemJS prototype which will be overridden.
-  const base = assignProps({}, SystemJS.prototype, ["resolve", "instantiate", "getRegister"]);
+  const base = assignProps({}, SystemJS.prototype, ["_init", "resolve", "instantiate", "getRegister"]);
 
   /**
-   * The `AmdSystemJS` class adds support for AMD modules to SystemJS.
+   * The `amdSystemJSMixin` mixin adds support for AMD modules to SystemJS.
    * 
    * To that end, the following methods are overridden:
-   * [resolve]{@link AmdSystemJS#resolve}, 
-   * [instantiate]{@link AmdSystemJS#resolve} and
-   * [getRegister]{@link AmdSystemJS#resolve}.
+   * [_init]{@link amdSystemJSMixin._mixin},
+   * [resolve]{@link amdSystemJSMixin.resolve},
+   * [instantiate]{@link amdSystemJSMixin.instantiate} and
+   * [getRegister]{@link amdSystemJSMixin.getRegister}.
    * 
-   * The property [amd]{@link AmdSystemJS#amd}  
+   * The property [amd]{@link amdSystemJSMixin.amd}
    * gives access to a hierarchical object model of modules, 
    * each represented by a node in the hierarchy, 
    * reflecting the current AMD configuration.
@@ -151,29 +152,32 @@
    * would be costly (memory leak or waste).
    * For these cases, missing nodes can be obtained _dettached_ from the hierarchy.
    * 
-   * @name AmdSystemJS
-   * @extends SystemJS
-   * @class
+   * @name amdSystemJSMixin
+   * @type {object}
+   * @mixin
    */
-  function AmdSystemJS() {
-
-    SystemJS.call(this);
-    
-    this._init();
-  }
   
-  classExtendMixin(AmdSystemJS, SystemJS, /** @lends AmdSystemJS# */{
+  objectCopy(SystemJS.prototype, /** @lends amdSystemJSMixin */{
+
+     /** @override */
+    _init: function() {
+      
+      base._init.call(this);
+
+      this.__initAmd();
+    },
 
     /**
      * Initializes the AMD aspects of this instance.
      * 
-     * @protected
+     * @private
+     * @internal
      */
-    _init: function() {
+    __initAmd: function() {
       /**
        * Gets the root node of the AMD module's namespace.
        * 
-       * @memberof AmdSystemJS#
+       * @memberof amdSystemJSMixin.
        * @type {RootModuleNode}
        * @readonly
        */
@@ -183,9 +187,9 @@
        * Queue of AMD definitions added during the load of a script file
        * and which are pending processing.
        * 
-       * Filled in by calling the {@link AmdSystemJS#__queueAmdDef} method.
+       * Filled in by calling the {@link amdSystemJSMixin.__queueAmdDef} method.
        * 
-       * @memberof AmdSystemJS#
+       * @memberof amdSystemJSMixin.
        * @type {Array.<({id: string?, deps: string[], execute: function})>}
        * @readonly
        * @private
@@ -193,18 +197,19 @@
       this.__amdDefQueue = [];
 
       /**
-       * When not `undefined`, the {@link AmdSystemJS#getRegister} method returns this value.
+       * When not `undefined`, the {@link amdSystemJSMixin.getRegister} method returns this value.
        * 
-       * @memberof AmdSystemJS#
+       * @memberof amdSystemJSMixin.
        * @type {Array|undefined}
        * @private
        * 
-       * @see AmdSystemJS#getRegister
-       * @see AmdSystemJS#__processRegister
+       * @see amdSystemJSMixin.getRegister
+       * @see amdSystemJSMixin.__processRegister
        */
       this.__forcedGetRegister = undefined;
     },
 
+    // Declared as a method to allow for unit testing.
     /** 
      * Logs a given text.
      * 
@@ -212,27 +217,27 @@
      * @param {string} [type="warn"] - The type of the log entry.
      * @protected
      */
-    _log: function(text, type) {
+    __log: function(text, type) {
       const method = type || "warn";
       console[method](text);
     },
 
     /** @override */
-    resolve: function(depId, parentUrl) {
+    resolve: function(specifier, parentUrl) {
       try {
         // Give precedence to other resolution strategies.
-        // Any isAbsoluteWeakUrl(depId) is handled by import maps.
+        // Any isAbsoluteUrl(depId) is handled by import maps.
         // Any name in the name registry is returned.
         return base.resolve.apply(this, arguments);
 
       } catch (error) {
-        // No isAbsoluteWeakUrl URLs here!
-        if (DEBUG && isAbsoluteUrlWeak(depId)) {
+        // No isAbsoluteUrl URLs here!
+        if (DEBUG && isAbsoluteUrl(specifier)) {
           throw error;
         }
 
-        const refNode = this.__getOrCreateNodeDetachedByUrl(parentUrl);
-        const normalizedId = refNode.normalizeDep(depId);
+        const refNode = this.__amdNodeOfUrl(parentUrl);
+        const normalizedId = refNode.normalizeDep(specifier);
         
         // Throw if normalizedId has no assigned URL (i.e. does not have a defined path or bundle).
         const node = this.amd.getOrCreateDetached(normalizedId);
@@ -387,7 +392,7 @@
      * @return {Array|undefined} A SystemJS register or `undefined`.
      * @override
      * 
-     * @see AmdSystemJS#__processRegister
+     * @see amdSystemJSMixin.__processRegister
      */
     getRegister: function() {
 
@@ -404,7 +409,7 @@
      * Processes a _new_ SystemJS register. 
      * 
      * Subclasses may process the new register by either overriding 
-     * the {@link AmdSystemJS#getRegister} method or this method, directly.
+     * the {@link amdSystemJSMixin.getRegister} method or this method, directly.
      * 
      * @param {Array} register - A SystemJS register to process.
      * @return {Array} The processed SystemJS register, possibly identical to `register`.
@@ -422,7 +427,7 @@
     },
 
     // -> AbstractChildModuleNode
-    __getOrCreateNodeDetachedByUrl: function(url) {
+    __amdNodeOfUrl: function(url) {
       if (url == null) {
         return this.amd;
       }
@@ -439,7 +444,7 @@
 
       // let id = pluginId + "!" + (resourceId || "");
 
-      let refNode = this.__getOrCreateNodeDetachedByUrl(parentUrl);
+      let refNode = this.__amdNodeOfUrl(parentUrl);
 
       return new Promise(function(resolve, reject) {
         let config = {};
@@ -552,7 +557,7 @@
       
       if (this.__amdDefQueue.length > 0) {
         // There's at least one AMD definition.
-        let loadNode = this.__getOrCreateNodeDetachedByUrl(removeUrlFragment(loadUrl));
+        let loadNode = this.__amdNodeOfUrl(removeUrlFragment(loadUrl));
 
         while((amdDef = this.__amdDefQueue.shift()) !== undefined) {
           const anonymousRegister = this.__processAmdDef(loadNode, amdDef.id, amdDef.deps, amdDef.execute);
@@ -561,7 +566,7 @@
               firstAnonymousRegister = anonymousRegister;
             } else {
               // Second, third, ... anonymous module in a script without AMD context (loadNode).
-              this._log("More than one anonymous AMD module found in a script. Ignoring.", "warn");
+              this.__log("More than one anonymous AMD module found in a script. Ignoring.", "warn");
             }
           }
         }
@@ -600,7 +605,7 @@
         let fullyNormalizedId = this.amd.normalizeDefined(id);
 
         if (fullyNormalizedId !== null && this.__getByName(fullyNormalizedId) !== null) {
-          this._log("Module '" + fullyNormalizedId + "' is already defined. Ignoring.", "warn");
+          this.__log("Module '" + fullyNormalizedId + "' is already defined. Ignoring.", "warn");
           return undefined;
         }
 
@@ -917,7 +922,7 @@
     // - Throws on STAR.
     // - Throws on empty.
     // - Throws on containing "!".
-    // - Throws on (isAbsoluteUrlWeak) URL.
+    // - Throws on (isAbsoluteUrl) URL.
     //
     // Lax
     // - Returns `null` if empty.
@@ -970,7 +975,7 @@
         throw new Error("Plugin call id not allowed: '" + singleId + "'.");
       }
 
-      if (isAbsoluteUrlWeak(singleId)) {
+      if (isAbsoluteUrl(singleId)) {
         throw new Error("URL not allowed: '" + singleId + "'.");
       }
 
@@ -979,7 +984,7 @@
 
     // require(["idOrAbsURL", ...]
     normalizeDep: function(depId) {
-      return isAbsoluteUrlWeak(depId) 
+      return isAbsoluteUrl(depId) 
         ? depId 
         : this.normalize(depId, true);
     },
@@ -1639,7 +1644,7 @@
       let url = path;
 
       // Not "//foo", "/foo" or "http://foo".
-      if (!isAbsoluteUrlWeak(url)) {
+      if (!isAbsoluteUrl(url)) {
         url = this.root.baseUrl + url;
       }
 
@@ -2419,22 +2424,6 @@
     return Sub;
   }
 
-  // Replace SystemJS with the locally declared AmdSystemJS.
-  // Hijack its prototype and use it for AmdSystemJS.
-  function classExtendMixin(Sub, Base, subSpec) {
-
-    const basePrototype = Base.prototype;
-    
-    basePrototype.constructor = Sub;
-    Sub.prototype = basePrototype;
-
-    if (subSpec) {
-      objectCopy(basePrototype, subSpec);
-    }
-
-    return Sub;
-  }
-
   function resolveUseDefault(ns) {
     return ns && ns.__useDefault ? ns.default : ns;
   }
@@ -2513,12 +2502,12 @@
   // "/a" - origin relative 
   // "//a" - protocol relative
   // "http://" - absolute
-  function isAbsoluteUrlWeak(text) {
+  function isAbsoluteUrl(text) {
     return !!text && RE_URL_ABSOLUTE.test(text);
   }
 
   function isBareName(text) {
-    return !!text && !isAbsoluteUrlWeak(text) && text[0] !== ".";
+    return !!text && !isAbsoluteUrl(text) && text[0] !== ".";
   }
   // #endregion
 
@@ -2526,12 +2515,7 @@
     
     const globalSystemJS = global.System;
 
-    // Replace the constructor of the only instance of SystemJS, System.
-    // This is needed because others have explicitly set a local constructor property on System.
-    // Otherwise, the proper value would be inherited via __proto__.
-    globalSystemJS.constructor = AmdSystemJS;
-
-    globalSystemJS._init();
+    globalSystemJS.__initAmd();
 
     const amd = globalSystemJS.amd;
 
