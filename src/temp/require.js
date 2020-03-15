@@ -36,6 +36,8 @@
 
   let unnormalizedCounter = 1;
 
+  // General
+  // -------
   // TODO: Check license.
   // TODO: Check cycle detection is properly handled
   // TODO: Check proper error handling
@@ -44,10 +46,53 @@
   // TODO: Complete/Review documentation
   //       - Document `require` functions.
   //       - Refactor of documentation__instantiateEnd.
+  // TODO: Unit tests...
+  // TODO: Resolving AMD ids returns normalized bare names.
+  //       Is this a problem? Could it be done differently?
+  //       Should/Could we totally rely on URL -> canonicalIds to do the job?
+  //       What about plugin calls which do not have a URL?
+  //       - bundle.js#!mid=bundle/id - the bundle itself
+  //       - bundle.js#!mid=bundled/module/id - a bundled module within
+  //       - plugin.js#!mid=plugin/id - the plugin module itself
+  //       - plugin.js#!mid=plugin/id!resource-id - a plugin call module
+  //       How do the two registries (url and named) behave relative to the cases:
+  //       - named/unnamed
+  //       - bundle
+  //       - resolved using import-map or AMD
+  //
+  // General Features
   // ----
-  // TODO: .JS <> bare interop?
-  // TODO: "__proto__" map lookup loophole
+  // TODO: Plugins, _unnormalized ids
+  // TODO: .JS <> bare interop? *** 
+  //       Compose <node.id> with .js?
+  // TODO: trimDots -> absolutizeId ***
+  // TODO: RequireJS supports mapping regular modules (not initially plugin calls) to plugin calls...
+  // TODO: Implement canonicalIdByUrl for Import Maps URLs.
+  // TODO: Flag to not overwrite define, require? Keep backup?
+  // TODO: Flag to allow top-level modules without a specified path (fallback to `name`)?
+  //
+  // Config
+  // ------
+  // TODO: config.shim ***
+  // TODO: config.deps, config.callback (using setTimout to let any following extras to be installed)
+  // 
+  // Require
+  // -------
+  // TODO: require.toUrl ***
+  // TODO: root.require.undef ***
+  // TODO: require.defined
+  // TODO: require.specified
+  //
+  // Loader Plugins
+  // --------------
+  // TODO: config argument ***
+  // TODO: onload.fromText *** - eval text as if it were a module script being loaded  
+  //       assuming its id is resourceId.
+  //
+  // JS
+  // ---
   // TODO: _log
+  // TODO: "__proto__" map lookup loophole
 
   // The following AMD/RequireJS features are not supported:
   // - A dependency ending with ".js" being considered an URL and not a module identifier.
@@ -274,7 +319,6 @@
       }
 
       // ## SystemJS - Import Maps
-      // TODO: Implement canonicalIdByUrl for Import Maps URLs.
 
       // ## SystemJS - AMD
       return this.amd.canonicalIdByUrl(url);
@@ -305,7 +349,10 @@
         if (isPluginCall) {
           const pluginId = resolvedId.substring(0, index);
           const resourceId = resolvedId.substring(index + 1) || null;
-          return this.__instantiatePluginCall(pluginId, resourceId, parentUrl);
+          
+          // Unfortunately, `pluginId` will be resolved, again.
+          return this.import(pluginId, parentUrl)
+            .then(this.__instantiatePluginCallEnd.bind(this, pluginId, resourceId, parentUrl));
         }
 
         // Get or create the AMD node. Must be a child node.
@@ -376,13 +423,6 @@
       return this.amd.getOrCreateDetached(id);
     },
     
-    __instantiatePluginCall: function(pluginId, resourceId, parentUrl) {
-
-      // Unfortunately, `pluginId` will be resolved, again.
-      return this.import(pluginId, parentUrl)
-        .then(this.__instantiatePluginCallEnd.bind(this, pluginId, resourceId, parentUrl));
-    },
-
     __instantiatePluginCallEnd: function(pluginId, resourceId, parentUrl, plugin) {
 
       let id = pluginId + "!" + (resourceId || "");
@@ -390,18 +430,21 @@
       let refNode = this.__getOrCreateNodeDetachedByUrl(parentUrl);
 
       return new Promise(function(resolve, reject) {
-        // TODO: Plugins: config argument
         let config = {};
 
         function onLoadCallback(value) {
-          resolve(value);
+
+          const constantRegister = [[], function(_export) {
+            _export({ default: value, __useDefault: true });
+            return {};
+          }];
+
+          resolve(constantRegister);
         }
 
         onLoadCallback.error = reject;
 
         onLoadCallback.fromText = function(text, textAlt) {
-          // TODO: Plugins: onload.fromText - eval text as if it were a module script being loaded 
-          // assuming its id is resourceId.
           if (textAlt) {
             text = textAlt;
           }
@@ -885,10 +928,13 @@
       
       if (isFull) {
         // Mapping.
-        // TODO: RequireJS supports mapping regular modules (not initially plugin calls) to plugin calls.
-        // In that case, main, below, should not be resolved (assumed normalized).
         normalizedId = this.applyMap(normalizedId);
 
+        // For now, assuming map cannot return a plugin call.
+        if (DEBUG) {
+          this.validateSingle(normalizedId);
+        }
+        
         // Main.
         const node = this.root.get(normalizedId);
         if (node !== null) {
@@ -1490,7 +1536,6 @@
 
       const parent = this.parent;
 
-      // TODO: Should there be a flag to enable the URL of top-level nodes to fallback to their `name`?
       // Do not allow top-level modules without a fixed path.
       if (parent.isRoot) {
         return null;
@@ -1790,9 +1835,6 @@
       eachOwn(config.config, function(config, id) {
         getOrCreateSingle(id).configure(config);
       });
-
-      // TODO: shim
-      // TODO: deps, callback
     },
 
     /**
@@ -2041,13 +2083,11 @@
       isBrowser: isBrowser,
 
       toUrl: function(moduleNamePlusExt) {
-        // TODO: require.toUrl
       },
 
       // As soon as the exports object is created and
       // the module is loading or has been loaded.
       defined: function(id) {
-        // TODO: require.defined
       },
 
       // There is an attached node for it?
@@ -2059,7 +2099,6 @@
       //    1.2. Else, normalize id normally.
       // 2. Apply mapping to id.
       specified: function(id) {
-        // TODO: require.specified
       }
     });
 
@@ -2128,7 +2167,7 @@
       },
 
       undef: function(id) {
-        // TODO: root.require.undef
+        
       }
     });
 
@@ -2179,8 +2218,6 @@
     let hasExports = false;
     let exports;
     const module = {
-      // TODO: Compose <node.id> with .js?
-
       // Per RequireJS, when there is no AMD context, 
       // the id of a module is its URL.
       id: node ? node.id : moduleUrl,
@@ -2374,8 +2411,6 @@
 
   function absolutizeId(id, parentId) {
     
-    // TODO: trimDots...
-
     // Anything not starting with a "." needs no handling.
     if (!id || id[0] !== ".") {
       return id;
@@ -2479,7 +2514,6 @@
     const config = readConfig(global.require) || readConfig(global.requirejs);
     
     // Publish in global scope.
-    // TODO: Always overwrite define, require? Keep backup?
     global.define = amd.define;
     global.require = global.requirejs = amd.require;
 
