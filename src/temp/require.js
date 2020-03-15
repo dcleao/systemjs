@@ -658,6 +658,14 @@
    * AMD modules which have no defined bare name, and thus are loaded directly by URL, 
    * do *NOT* have an associated module node.
    * 
+   * ## Class Hierarchy
+   * 
+   * `AbstractModuleNode`
+   *   |- `RootModuleNode`
+   *   |- `AbstractChildModuleNode`
+   *        |- `AnonymousChildModuleNode`
+   *        |- `ChildModuleNode`
+   * 
    * @name AbstractModuleNode
    * @class
    * 
