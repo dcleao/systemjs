@@ -31,7 +31,7 @@
   const RE_URL_ABSOLUTE = /^\/|[\w\+\.\-]+:/i;
   const RE_URL_BLOB = /^blob:/i;
   const RE_URL_DATA_OR_BLOB = /^(data|blob):/i;
-  const URL_MODULE_FRAGMENT = "#!cid=";
+  const URL_MODULE_FRAGMENT = "#!mid=";
   const isBrowser = typeof window !== "undefined" && typeof navigator !== "undefined" && !!window.document;
 
   let unnormalizedCounter = 1;
@@ -47,18 +47,6 @@
   //       - Document `require` functions.
   //       - Refactor of documentation__instantiateEnd.
   // TODO: Unit tests...
-  // TODO: Resolving AMD ids returns normalized bare names.
-  //       Is this a problem? Could it be done differently?
-  //       Should/Could we totally rely on URL -> canonicalIds to do the job?
-  //       What about plugin calls which do not have a URL?
-  //       - bundle.js#!mid=bundle/id - the bundle itself
-  //       - bundle.js#!mid=bundled/module/id - a bundled module within
-  //       - plugin.js#!mid=plugin/id - the plugin module itself
-  //       - plugin.js#!mid=plugin/id!resource-id - a plugin call module
-  //       How do the two registries (url and named) behave relative to the cases:
-  //       - named/unnamed
-  //       - bundle
-  //       - resolved using import-map or AMD
   //
   // General Features
   // ----
@@ -213,6 +201,7 @@
       try {
         // Give precedence to other resolution strategies.
         // Any isAbsoluteWeakUrl(depId) is handled by import maps.
+        // Any name in the name registry is returned.
         return base.resolve.apply(this, arguments);
 
       } catch (error) {
@@ -226,11 +215,12 @@
         
         // Throw if normalizedId has no assigned URL (i.e. does not have a defined path or bundle).
         const node = this.amd.getOrCreateDetached(normalizedId);
-        if (node.path === null) {
+        const url = node.url;
+        if (url === null) {
           throw error;
         }
 
-        return normalizedId
+        return url;
       }
     },
 
@@ -250,12 +240,12 @@
      * 
      * ## URL canonical identifier annotation fragment
      * 
-     * If a URL contains a fragment with the form `#!cid=<id>`, 
+     * If a URL contains a fragment with the form `#!mid=<id>`, 
      * it is trusted that `<id>` is its canonical identifier.
      * 
      * For example, 
      * the canonical identifier of the URL 
-     * `http://my-company.com/scripts/utils.js#!cid=@my-company/core/utils` 
+     * `http://my-company.com/scripts/utils.js#!mid=@my-company/core/utils` 
      * is `@my-company/core/utils`.
      * 
      * ## Import Maps
@@ -274,7 +264,7 @@
      * the given URL must contain the special fragment canonical identifier annotation.
      * 
      * For example, the canonical identifier of the URL
-     * `http://my-company.com/scripts/bundle.js#!cid=bundled/module/id`
+     * `http://my-company.com/scripts/bundle.js#!mid=bundled/module/id`
      * is `bundled/module/id`.
      * 
      * ## Example
@@ -312,7 +302,7 @@
         throw new Error("Argument 'url' is required.");
       }
 
-      // 2. If the fragment #!cid=<id> is there, just trust it and return the module identifier.
+      // 2. If the fragment #!mid=<id> is there, just trust it and return the module identifier.
       const moduleFragmentIndex = url.indexOf(URL_MODULE_FRAGMENT);
       if (moduleFragmentIndex >= 0) {
         return url.substr(moduleFragmentIndex + URL_MODULE_FRAGMENT.length);
@@ -325,18 +315,15 @@
     },
 
     /** @override */
-    instantiate: function(resolvedId, parentUrl) {
-
-      let loadUrl = resolvedId;
-
-      // When AMD.
+    instantiate: function(loadUrl, parentUrl) {
+      
+      // The AMD node corresponding to the regular URL (not a plugin call) being imported.
       let importNode = null;
-      let loadNode = null;
 
-      // If it's still an AMD base identifier, it needs further resolution.
-      if (isBareName(resolvedId)) {
+      let resolvedId = this.canonicalIdByUrl(loadUrl);
+      if (resolvedId !== null) {
         // Already in the named registry?
-        const register = this.__getByName(resolvedId);
+        const register = this.__getByName(loadUrl);
         if (register !== null) {
           return register;
         }
@@ -350,19 +337,23 @@
           const pluginId = resolvedId.substring(0, index);
           const resourceId = resolvedId.substring(index + 1) || null;
           
-          // Unfortunately, `pluginId` will be resolved, again.
+          // Attempt going a bit faster by providing the plugin id url directly?
+          // const pluginUrl = removeUrlFragment(loadUrl) + URL_MODULE_FRAGMENT + pluginId;
+
           return this.import(pluginId, parentUrl)
             .then(this.__instantiatePluginCallEnd.bind(this, pluginId, resourceId, parentUrl));
         }
 
-        // Get or create the AMD node. Must be a child node.
+        // Get or create the AMD child node.
         importNode = this.amd.getOrCreate(resolvedId);
-        loadNode = importNode.bundleOrSelf;
-        loadUrl = loadNode.url;
+        // loadNode = importNode.bundleOrSelf;
+        // - module.js#!mid=module/id             - the module itself (even if bundle or plugin)
+        // - bundle.js#!mid=bundled/module/id     - a bundled module, within bundle.js
+        // - plugin.js#!mid=plugin/id!resource-id - a plugin call module
       }
 
       return Promise.resolve(base.instantiate.call(this, loadUrl, parentUrl))
-        .then(this.__instantiateEnd.bind(this, loadUrl, importNode, loadNode));
+        .then(this.__instantiateEnd.bind(this, loadUrl, importNode));
     },
 
     /** 
@@ -425,7 +416,7 @@
     
     __instantiatePluginCallEnd: function(pluginId, resourceId, parentUrl, plugin) {
 
-      let id = pluginId + "!" + (resourceId || "");
+      // let id = pluginId + "!" + (resourceId || "");
 
       let refNode = this.__getOrCreateNodeDetachedByUrl(parentUrl);
 
@@ -475,17 +466,15 @@
      * It is expected that a script file contains either AMD or SystemJS definitions.
      * 
      * @param {string} loadUrl - The URL of the file being loaded.
-     * @param {ChildModuleNode?} importNode - The AMD child node being imported, or `null`, if none.
-     * @param {ChildModuleNode?} loadNode - The AMD child node being loaded, or `null`, if none.
-     * When the node being instantiated is provided by a bundle file, 
-     * then this will be the bundle module node. Otherwise, it is identical to the `importNode` parameter.
+     * @param {ChildModuleNode?} importNode - The AMD child node being imported; `null`, otherwise.
      * @param {Array} baseRegister - The SystemJS register returned by 
      * the base implementation, {@link SystemJS#instantiate}. Assuming it is defined.
      * 
      * @return {Array} A SystemJS register.
      * @private
      */
-    __instantiateEnd: function(loadUrl, importNode, loadNode, baseRegister) {
+    __instantiateEnd: function(loadUrl, importNode, baseRegister) {
+      // loadNode = importNode.bundleOrSelf.
       // Process any queued AMD definitions.
       // 1. When there is no AMD context, the first found anonymous AMD module is returned by __processAmdDefs, 
       //    and is not registered, yet.
@@ -507,9 +496,9 @@
       // 
       // 3. No AMD context, or anonymous AMD modules, 
       //    so just return any register determined by the base implementation.
-      return this.__processAmdDefs(loadUrl, loadNode) ||
-        (importNode 
-          ? (this.__getByName(importNode.id) || EMTPY_AMD_REGISTER) 
+      return this.__processAmdDefs(loadUrl) ||
+        (importNode
+          ? (this.__getByName(importNode.url) || EMTPY_AMD_REGISTER)
           : baseRegister);
     },
 
@@ -530,23 +519,19 @@
      * Processes all queued AMD (module definitions).
      * 
      * @param {string} loadUrl - The URL of the file being loaded.
-     * @param {ChildModuleNode?} loadNode - The AMD child node being laoded, or `null`, if none.
      * 
      * @return {Array|undefined} The first found anonymous AMD register, 
-     * if any was processed and `loadNode` is `null`; `undefined`, otherwise.
+     * if any was processed and there is no AMD context for `loadUrl`; `undefined`, otherwise.
      * @private
      */
-    __processAmdDefs: function(loadUrl, loadNode) {
+    __processAmdDefs: function(loadUrl) {
       
       let amdDef;
       let firstAnonymousRegister = undefined;
-      // let id = url ? this.canonicalIdByUrl(url) : null;
+      
       if (this.__amdDefQueue.length > 0) {
         // There's at least one AMD definition.
-        if (loadNode === null) {
-          // -> AMD Module loaded by URL.
-          loadNode = this.__getOrCreateNodeDetachedByUrl(loadUrl);
-        }
+        let loadNode = this.__getOrCreateNodeDetachedByUrl(removeUrlFragment(loadUrl));
 
         while((amdDef = this.__amdDefQueue.shift()) !== undefined) {
           const anonymousRegister = this.__processAmdDef(loadNode, amdDef.id, amdDef.deps, amdDef.execute);
@@ -577,7 +562,7 @@
      * For named registers are immediately registered in the named register and `undefined` is returned.
      * For unnamed/anonymous registers, the register is returned.
      * 
-     * @param {ChildModuleNode} loadNode - The AMD child node being loaded.
+     * @param {AbstractChildModuleNode} loadNode - The AMD child node being loaded.
      * @param {string?} id - The AMD identifier of the AMD (definition).
      * @param {Array.<string>} deps - An array of AMD references of the dependencies of the AMD (definition).
      * @param {function} execute - The AMD factory function.
@@ -588,11 +573,10 @@
     __processAmdDef: function(loadNode, id, deps, execute) {
       
       // Capture id from loading AMD module, if any.
-      let fullyNormalizedId;
       let node;
       if (id !== null) {
         // Ensure normalized (assumes normalize is idempotent...)
-        fullyNormalizedId = this.amd.normalizeDefined(id);
+        let fullyNormalizedId = this.amd.normalizeDefined(id);
 
         if (fullyNormalizedId !== null && this.__getByName(fullyNormalizedId) !== null) {
           this._log("Module '" + fullyNormalizedId + "' is already defined. Ignoring.", "warn");
@@ -607,8 +591,6 @@
         }
       } else {
         node = loadNode;
-        // May be null!
-        fullyNormalizedId = node.id;
       }
 
       if (DEBUG && node.isRoot) {
@@ -617,9 +599,10 @@
 
       // Need to let `amdRegister` be processed by any subclasses.
       let amdRegister = this._processRegister(createAmdRegister(node, deps, execute));
-      
-      if (fullyNormalizedId !== null) {
-        this.__nameRegistry[fullyNormalizedId] = amdRegister;
+      const url = node.url;
+      if (url !== null) {
+        // No other way to register multiple modules by URL loaded by a single URL...
+        this.__nameRegistry[url] = amdRegister;
         return undefined;
       }
 
@@ -1167,7 +1150,7 @@
         throw new Error("Invalid State!");
       }
 
-      return (this.__amdModule = createAmdModule(this));
+      return (this.__amdModule = createAmdModule(null, this));
     },
 
     __assertAttached: function() {
@@ -1449,6 +1432,16 @@
     /**
      * Gets the URL of this module.
      * 
+     * For purposes of better supporting canonicalIdByUrl and 
+     * to integrate better with SystemJS's resolve semantics,
+     * module URLs include a fragment annotation:
+     * 
+     * - module.js#!mid=module/id             - regular module
+     * - bundle.js#!mid=bundle/id             - bundle module
+     * - plugin.js#!mid=plugin/id             - plugin module
+     * - bundle.js#!mid=bundled/module/id     - bundled module, within
+     * - plugin.js#!mid=plugin/id!resource-id - plugin call module
+     * 
      * The URL is determined from the module's {@link AbstractModuleNode#id}
      * using the following procedure:
      * 
@@ -1470,8 +1463,7 @@
      * 4. let url = regularUrl
      * 5. if this.urlArgs and not url is "blob:...":
      *    url = url + this.urlArgs(load-id, url)
-     * 6. if bundle:
-     *    url <- setUrlFragment(url, "#!cid=<id>")
+     * 6. url <- setUrlFragment(url, "#!mid=<id>")
      * 
      * @type {string?}
      * @readonly
@@ -1480,6 +1472,7 @@
     get url() {
       const bundle = this.bundle;
       if (bundle !== null) {
+        // bundle.js#!mid=bundled/module/id
         return setUrlFragment(bundle.url, URL_MODULE_FRAGMENT + this.id);
       }
 
@@ -1501,6 +1494,11 @@
             url += urlArgs(this.id, url);
           }
         }
+
+        // module.js#!mid=module/id
+        // bundle.js#!mid=bundle/id
+        // plugin.js#!mid=plugin/id
+        url = setUrlFragment(url, URL_MODULE_FRAGMENT + this.id);
       }
       
       return url;
