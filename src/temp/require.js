@@ -2053,7 +2053,10 @@
 
   function createDefine(rootNode) {
 
-    define.amd = {};
+    define.amd = {
+      // https://github.com/amdjs/amdjs-api/wiki/jQuery-and-AMD
+      jQuery: true
+    };
 
     return define;
 
