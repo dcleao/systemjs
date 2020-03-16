@@ -32,13 +32,13 @@
 	};
 </script>
 <script src="../dist/system.js"></script>
-<script src="../dist/extras/named-register.js"></script>
-<script src="../dist/extras/use-default.js"></script>
-<script src="../src/temp/require.js"></script>
+<script src="../dist/extras/use-default.js"></script>    <!-- .import -->
+<script src="../src/temp/require.js"></script>           <!-- .resolve | .instantiate -->
+<script src="../dist/extras/named-register.js"></script> <!-- .resolve | .instantiate -->
 
 <script>
 	System.amd.require.config({
-		paths: {
+		"paths": {
 			"amd-tests": "../src/temp/tests"
 		},
 		"map": {
@@ -48,6 +48,12 @@
 			"amd-tests/amd-scoped-dep": {
 				"A": "amd-tests/amd-dependencyA"
 			}
+		},
+		"bundles": {
+			"amd-tests/amd-bundleA": [
+				"amd-bundleA-bundled-module1",
+				"amd-bundleA-bundled-module2"
+			]
 		}
 	});
 
