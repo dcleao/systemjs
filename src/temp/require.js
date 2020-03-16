@@ -224,10 +224,11 @@
 
     /** @override */
     resolve: function(specifier, parentUrl) {
+      // named-registry.js extra loaded after.
+      // assert specifier not in name registry
       try {
         // Give precedence to other resolution strategies.
         // Any isAbsoluteUrl(depId) is handled by import maps.
-        // Any name in the name registry is returned.
         return base.resolve.apply(this, arguments);
 
       } catch (error) {
@@ -342,21 +343,16 @@
 
     /** @override */
     instantiate: function(loadUrl, parentUrl) {
-      
-      // The AMD node corresponding to the regular URL (not a plugin call) being imported.
+      // named-registry.js extra loaded after.
+      // assert loadUrl not in name registry
+
+      // The AMD node corresponding to a regular URL being imported.
       let importNode = null;
 
       let resolvedId = this.canonicalIdByUrl(loadUrl);
       if (resolvedId !== null) {
-        // Already in the named registry?
-        const register = this.__getByName(loadUrl);
-        if (register !== null) {
-          return register;
-        }
-
         // If it's a plugin call, then get the plugin module, first.
-        // Then, call its plugin interface with the argument to determine 
-        // the composite module (resolvedId).
+        // Then, call its plugin interface with the argument to determine the composite module (resolvedId).
         const index = resolvedId.indexOf("!");
         const isPluginCall = index !== -1;
         if (isPluginCall) {
@@ -475,21 +471,17 @@
     },
 
     /** 
-     * Handles the end phase of instantiation of either a URL or 
-     * a _normal_ AMD module (i.e. not a loader plugin module).
+     * Handles the end phase of instantiation of either a URL or a regular AMD module.
      * 
-     * Processes any queued AMD `define` calls by creating and registering corresponding SystemJS registers.
+     * Processes any queued AMD `define` calls by creating and registering the corresponding SystemJS registers.
      * 
-     * If any AMD modules are processed and if an AMD module had been requested, 
-     * as represented by the given `importNode` argument, 
-     * then this module's SystemJS register is read from the named registry and returned.
-     * 
-     * Otherwise, if an anonymous AMD module is processed, its SystemJS register is returned.
+     * If an AMD module had been requested, as represented by the given `importNode` argument, 
+     * then this module's SystemJS register is read from the named registry and returned,
+     * and if it is missing, an empty SystemJS register is returned.
      * 
      * Otherwise, the SystemJS register in argument `baseRegister` is returned.
-     * Lastly, if this is `null`, an empty SystemJS register is returned.
      * 
-     * It is expected that a script file contains either AMD or SystemJS definitions.
+     * It is expected that a script file contains either AMD _or_ SystemJS definitions.
      * 
      * @param {string} loadUrl - The URL of the file being loaded.
      * @param {ChildModuleNode?} importNode - The AMD child node being imported; `null`, otherwise.
@@ -500,32 +492,14 @@
      * @private
      */
     __instantiateEnd: function(loadUrl, importNode, baseRegister) {
-      // loadNode = importNode.bundleOrSelf.
-      // Process any queued AMD definitions.
-      // 1. When there is no AMD context, the first found anonymous AMD module is returned by __processAmdDefs, 
-      //    and is not registered, yet.
-      //    In that case, return it, thus becoming associated with the requested URL, in the core registry.
-      // 
-      // 2. (importNode !== null) - An AMD module was imported using its identifier?
-      //   assert loadNode !== null
-      //   If any anonymous AMD was found by __processAmdDefs, 
-      //   it has been associated with the bundle module (loadNode) and registered by its id.
-      //   In the "normal" module case (not-a-bundle), 
-      //   this became associated with the imported module (importNode).
-      //   If no module was registered for the imported module (importNode), 
-      //   it is either the case of: 
-      //   a) a "normal" module which doesn't call define (importNode === loadNode), or
-      //   b) a bundle module (loadNode) which doesn't carry the requested module (importNode) after all,
-      //      probably due to an incorrect `bundles` configuration.
-      //   TODO: For now, assuming both cases are tolerable and assuming this means the module is empty...
-      //   Case b) probably should signal an error.
-      // 
-      // 3. No AMD context, or anonymous AMD modules, 
-      //    so just return any register determined by the base implementation.
-      return this.__processAmdDefs(loadUrl) ||
-        (importNode
-          ? (this.__getByName(importNode.url) || EMTPY_AMD_REGISTER)
-          : baseRegister);
+      
+      this.__processAmdDefs(loadUrl);
+
+      if (importNode !== null) {
+        return this.__nameRegistry[importNode.url] || EMTPY_AMD_REGISTER;
+      }
+
+      return baseRegister;
     },
 
     /**
@@ -545,106 +519,68 @@
      * Processes all queued AMD (module definitions).
      * 
      * @param {string} loadUrl - The URL of the file being loaded.
-     * 
-     * @return {Array|undefined} The first found anonymous AMD register, 
-     * if any was processed and there is no AMD context for `loadUrl`; `undefined`, otherwise.
      * @private
      */
     __processAmdDefs: function(loadUrl) {
       
-      let amdDef;
-      let firstAnonymousRegister = undefined;
-      
       if (this.__amdDefQueue.length > 0) {
-        // There's at least one AMD definition.
+        
         let loadNode = this.__amdNodeOfUrl(removeUrlFragment(loadUrl));
 
+        let amdDef;
         while((amdDef = this.__amdDefQueue.shift()) !== undefined) {
-          const anonymousRegister = this.__processAmdDef(loadNode, amdDef.id, amdDef.deps, amdDef.execute);
-          if (anonymousRegister !== undefined) {
-            if (firstAnonymousRegister === undefined) {
-              firstAnonymousRegister = anonymousRegister;
-            } else {
-              // Second, third, ... anonymous module in a script without AMD context (loadNode).
-              this.__log("More than one anonymous AMD module found in a script. Ignoring.", "warn");
-            }
-          }
+          this.__processAmdDef(loadNode, amdDef.id, amdDef.deps, amdDef.execute);
         }
       }
-
-      return firstAnonymousRegister;
     },
 
     /**
-     * Processes an AMD (module definition).
-     * 
-     * If `id` is `null` and `loadNode.id` is not, 
-     * then the identifier is assumed to be that of `loadNode`.
-     * Otherwise, if `id` is `null` and `loadNode.id` as well,
-     * then the AMD module remains anonymous.
-     * 
-     * A SystemJS register is created.
-     * 
-     * For named registers are immediately registered in the named register and `undefined` is returned.
-     * For unnamed/anonymous registers, the register is returned.
+     * Processes an AMD (module definition) and registers a SystemJS register under its URL.
      * 
      * @param {AbstractChildModuleNode} loadNode - The AMD child node being loaded.
      * @param {string?} id - The AMD identifier of the AMD (definition).
      * @param {Array.<string>} deps - An array of AMD references of the dependencies of the AMD (definition).
      * @param {function} execute - The AMD factory function.
-     * 
-     * @return {Array|undefined} The created AMD register, if it remains anonymous; `undefined`, otherwise.
      * @private
      */
     __processAmdDef: function(loadNode, id, deps, execute) {
       
-      // Capture id from loading AMD module, if any.
-      let node;
-      if (id !== null) {
-        // Ensure normalized (assumes normalize is idempotent...)
-        let fullyNormalizedId = this.amd.normalizeDefined(id);
+      const isNamedDefinition = id !== null;
 
-        if (fullyNormalizedId !== null && this.__getByName(fullyNormalizedId) !== null) {
-          this.__log("Module '" + fullyNormalizedId + "' is already defined. Ignoring.", "warn");
-          return undefined;
+      // The AMD node being _defined_.
+      // When the definition is anonymous, assume that it is `loadNode` which is being defined.
+      // - Note that `loadNode` may or may not have a canonical identifier...
+      // When the definition is named, get or create a node for it.
+      const definedNode = isNamedDefinition
+        ? this.amd.getOrCreate(this.amd.normalizeDefined(id))
+        : loadNode;
+
+      const url = definedNode.url;
+
+      if (DEBUG) {
+        // Both of the following cases are the result of misconfiguration and are thus not supported:
+        // - If the node has no defined bundle, `loadNode` could be it.
+        // - If the node has no defined fixedPath, `loadNode.url` could be it.
+        if (isNamedDefinition && definedNode !== loadNode && definedNode.bundle !== loadNode) {
+          throw new Error("Module with undeclared path or bundle.");
         }
 
-        node = this.amd.getOrCreate(fullyNormalizedId);
-
-        // J.I.C. be sure to set the bundle.
-        if (node !== loadNode) {
-          node.bundle = loadNode;
+        if (url === null) {
+          throw new Error("Invalid state");
         }
-      } else {
-        node = loadNode;
       }
 
-      if (DEBUG && node.isRoot) {
-        throw new Error("Invalid state.");
+      // Valid way to test if a module has already been defined?
+      // Through the API, node.require can ask for module even if the module has not been loaded.
+      if (definedNode.amdModule !== null) {
+        this.__log("Module '" + (definedNode.id || url) + "' is already defined. Ignoring.", "warn");
+        return;
       }
 
-      // Need to let `amdRegister` be processed by any subclasses.
-      let amdRegister = this._processRegister(createAmdRegister(node, deps, execute));
-      const url = node.url;
-      if (url !== null) {
-        // No other way to register multiple modules by URL loaded by a single URL...
-        this.__nameRegistry[url] = amdRegister;
-        return undefined;
-      }
-
-      // Anonymous and yet unregistered AMD register.
-      return amdRegister;
-    },
-
-    /**
-     * Gets a named register with the given name, if any.
-     * 
-     * @param {string} name - The name of the register.
-     * @return {Array?} The register with the given name, if any; `null`, otherwise.
-     * @private
-     */
-    __getByName: function(name) {
-      return getOwn(this.__nameRegistry, name) || null;
+      // Create the register.
+      // Let any other extras _transform_ it by making it go through `getRegister`.
+      // Save it in the named register. No other way to register multiple modules by URL loaded by a single URL...
+      this.__nameRegistry[url] = this._processRegister(createAmdRegister(definedNode, deps, execute));
     },
 
     get __nameRegistry() {
@@ -878,6 +814,7 @@
 
     // Supports AMD plugins.
     // When DEBUG and !Lax: 
+    // - Throws on null id.
     // - Throws on URLs via normalizeSingle
     normalize: function(id, isFull, isLax) {
       if (isLax) {
@@ -889,25 +826,20 @@
           throw new Error("Invalid empty id.");
         }
       }
-
-      let normalizedId;
+      
+      // const [normalizedId = id, resourceId] = splitPluginResourceId(id);
+      let normalizedId = id;
       let resourceId = null;
-
-      const index = id.indexOf("!");
-      const isPluginCall = index !== -1;
-      if (isPluginCall) {
-        normalizedId = id.substring(0, index);
-        resourceId = id.substring(index + 1);
-      } else {
-        normalizedId = id;
+      const pluginResourceIds = splitPluginResourceId(id);
+      if (pluginResourceIds) {
+        normalizedId = pluginResourceIds[0];
+        resourceId = pluginResourceIds[1];
       }
 
       normalizedId = this.normalizeSingle(normalizedId, isFull, isLax);
       
-      if (isPluginCall) {
-        resourceId = this.__normalizePluginResource(normalizedId, resourceId);
-        
-        return normalizedId + "!" + resourceId;
+      if (pluginResourceIds) {
+        return normalizedId + "!" + this.__normalizePluginResource(normalizedId, resourceId);
       }
       
       return normalizedId;
@@ -955,7 +887,7 @@
         // Main.
         const node = this.root.get(normalizedId);
         if (node !== null) {
-          normalizedId = node.mainOrSelf.id;
+          normalizedId = (node.main || node).id;
         }
       }
 
@@ -991,6 +923,7 @@
 
     // define(id, ...
     normalizeDefined: function(definedId) {
+      // Ensure normalized (assumes normalize is idempotent...)
       return this.normalize(definedId, true);
     },
 
@@ -1184,7 +1117,33 @@
         throw new Error("Invalid State!");
       }
 
-      return (this.__amdModule = createAmdModule(null, this));
+      const url = this.url;
+      let hasExports = false;
+      let exports;
+      const amdModule = {
+        // Per RequireJS, when there is no AMD context, 
+        // the id of a "module" dependency is its URL.
+        id: (this.id || url),
+        uri: url,
+        
+        config: function() {
+          return this.config || {};
+        }.bind(this),
+
+        get exports() {
+          if (!hasExports) {
+            hasExports = true;
+            exports = {};
+          }
+
+          return exports;
+        },
+        set exports(value) {
+          exports = value;
+        }
+      };
+
+      return (this.__amdModule = amdModule);
     },
 
     __assertAttached: function() {
@@ -1306,17 +1265,6 @@
     },
 
     /**
-     * Gets this modules's main module, 
-     * when this module is an AMD package; this module, otherwise.
-     * 
-     * @type {ChildModuleNode}
-     * @readonly
-     */
-    get mainOrSelf() {
-      return this.__main || this;
-    },
-
-    /**
      * Sets the main module of this module.
      * 
      * Should be a regular module identifier (without "!").
@@ -1356,16 +1304,6 @@
           this.__bundle = bundleNew;
         });
       }
-    },
-
-    /**
-     * Gets this modules's bundle module, if any; this module, otherwise.
-     * 
-     * @type {ChildModuleNode}
-     * @readonly
-     */
-    get bundleOrSelf() {
-      return this.__bundle || this;
     },
 
     /**
@@ -1457,7 +1395,7 @@
         const bundleId = this.id;
         bundleSpec.forEach(function(id) {
           if (id !== bundleId) {
-            this.getOrCreate(id).bundle = this;
+            this.root.getOrCreate(id).bundle = this;
           }
         }, this);
       }
@@ -2246,36 +2184,6 @@
     }
   }
 
-  // when loading a script with no canonical id, node is null.
-  // when creating a module to satisfy 
-  function createAmdModule(loadUrl, node) {
-    const moduleUrl = node ? node.bundleOrSelf.url : loadUrl;
-    let hasExports = false;
-    let exports;
-    const module = {
-      // Per RequireJS, when there is no AMD context, 
-      // the id of a module is its URL.
-      id: node ? node.id : moduleUrl,
-      uri: moduleUrl,
-      config: function() {
-        return (node && node.config) || {};
-      },
-      get exports() {
-        if (!hasExports) {
-          hasExports = true;
-          exports = {};
-        }
-
-        return exports;
-      },
-      set exports(value) {
-        exports = value;
-      }
-    };
-
-    return module;
-  }
-
   /**
    * Creates a SystemJS register for an AMD (module definition).
    * 
@@ -2509,11 +2417,22 @@
   function isBareName(text) {
     return !!text && !isAbsoluteUrl(text) && text[0] !== ".";
   }
+
+  function splitPluginResourceId(id) {
+    const index = id.indexOf("!");
+    return index !== -1
+      ? [id.substring(0, index), id.substring(index + 1)]
+      : null;
+  }
   // #endregion
 
   (function initGlobal() {
     
     const globalSystemJS = global.System;
+
+    if (globalSystemJS.registerRegistry) {
+      throw Error("The named-register.js extra for SystemJS must be included after the require.js extra.");
+    }
 
     globalSystemJS.__initAmd();
 
