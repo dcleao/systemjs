@@ -21,10 +21,7 @@
   const DEBUG = true;
   const O_HAS_OWN = Object.prototype.hasOwnProperty;
   const REQUIRE_EXPORTS_MODULE = ["require", "exports", "module"];
-  const EMTPY_AMD_REGISTER = [[], function(_export) {
-    _export({ default: undefined, __useDefault: true });
-    return {};
-  }];
+  const EMTPY_AMD_REGISTER = constantRegister();
   const MAP_SCOPE_ANY_MODULE = "*";
   const RE_JS_EXT = /\.js$/i;
   // Absolute or Protocol Relative or Origin Relative
@@ -358,7 +355,7 @@
        * The Named AMD node being imported, if any.
        * 
        * When `importNode` remains `null` here,
-       * in `__instantiateEnd`, if AMD defines are processed,
+       * in `__instantiateRegularEnd`, if AMD defines are processed,
        * an `AnonymousNode` is created to represent `specifier` (an URL).
        * 
        * @type {null|SimpleNode|ResourceNode}
@@ -372,14 +369,14 @@
           importNode = this.amd.getOrCreate(resolvedId);
           if (importNode instanceof ResourceNode) {
             // Load the plugin first.
-            return this.import(importNode.plugin.id, referralUrl)
+            return this.import(importNode.plugin.id)
               .then(this.__instantiateResource.bind(this, importNode, referralUrl));
           }
         }
       }
       
       return Promise.resolve(base.instantiate.call(this, specifier, referralUrl))
-        .then(this.__instantiateEnd.bind(this, specifier, importNode));
+        .then(this.__instantiateRegularEnd.bind(this, specifier, importNode));
     },
 
     /** 
@@ -403,6 +400,54 @@
       }
 
       return base.getRegister.call(this);
+    },
+
+    /** 
+     * Handles the end phase of instantiation of either an Anonymous or Simple AMD module.
+     * 
+     * Processes any queued AMD `define` calls by creating and registering the corresponding SystemJS registers.
+     * 
+     * If an AMD module had been requested, as represented by the given `importNode` argument, 
+     * then this module's SystemJS register is read from the named registry and returned,
+     * and if it is missing, an empty SystemJS register is returned.
+     * 
+     * Otherwise, the SystemJS register in argument `baseRegister` is returned.
+     * 
+     * It is expected that a script file contains either AMD _or_ SystemJS definitions.
+     * 
+     * @param {string} loadUrl - The URL of the file being loaded.
+     * @param {SimpleNode?} namedImportNode - The AMD child node being imported by name; `null`, otherwise.
+     * @param {Array} baseRegister - The SystemJS register returned by 
+     * the base implementation, {@link SystemJS#instantiate}. Assuming it is defined.
+     * 
+     * @return {Array} A SystemJS register.
+     * @private
+     */
+    __instantiateRegularEnd: function(loadUrl, namedImportNode, baseRegister) {
+      
+      this.__processAmdDefs(loadUrl);
+
+      if (namedImportNode !== null) {
+        return this.__nameRegistry[namedImportNode.url] || EMTPY_AMD_REGISTER;
+      }
+
+      return baseRegister;
+    },
+
+    __instantiateResource: function(resourceNode, referralUrl, plugin) {
+
+      // Resource already normalized.
+      const resourceValuePromise = resourceNode.isNormalized
+        
+        // Load the normalized resource.
+        ? resourceNode.loadWithPlugin(plugin, this.__amdNodeOfUrl(referralUrl))
+
+        // Now that the plugin is loaded, ask for the original resource again.
+        // The resourceNode argument represents an "alias" node for the original node.
+        : this.import(resourceNode.originalId, referralUrl)
+
+      // Convert the resource value to a SystemJS register.
+      return resourceValuePromise.then(constantRegister);
     },
 
     /**
@@ -440,84 +485,6 @@
       return this.amd.getOrCreateDetached(id);
     },
     
-    __instantiateResource: function(resourceNode, referralUrl, plugin) {
-
-      let referralNode = this.__amdNodeOfUrl(referralUrl);
-
-      if (!resourceNode.isNormalized) {
-
-      }
-
-      return new Promise(function(resolve, reject) {
-        
-        const config = {};
-        
-        const onLoadCallback = createOnloadCallback(resolve, reject);
-
-        plugin.load(resourceNode.resourceName, referralNode.require, onLoadCallback, config);
-      });
-
-      // ---
-
-      function createOnloadCallback(resolve, reject) {
-
-        function onLoadCallback(value) {
-
-          const constantRegister = [[], function(_export) {
-            _export({ default: value, __useDefault: true });
-            return {};
-          }];
-
-          resolve(constantRegister);
-        }
-
-        onLoadCallback.error = reject;
-
-        onLoadCallback.fromText = function(text, textAlt) {
-          if (textAlt) {
-            text = textAlt;
-          }
-
-          // eval
-          // define is called..
-        };
-
-        return onLoadCallback;
-      }
-    },
-
-    /** 
-     * Handles the end phase of instantiation of either an Anonymous or Simple AMD module.
-     * 
-     * Processes any queued AMD `define` calls by creating and registering the corresponding SystemJS registers.
-     * 
-     * If an AMD module had been requested, as represented by the given `importNode` argument, 
-     * then this module's SystemJS register is read from the named registry and returned,
-     * and if it is missing, an empty SystemJS register is returned.
-     * 
-     * Otherwise, the SystemJS register in argument `baseRegister` is returned.
-     * 
-     * It is expected that a script file contains either AMD _or_ SystemJS definitions.
-     * 
-     * @param {string} loadUrl - The URL of the file being loaded.
-     * @param {AbstractChildNode?} importNode - The AMD child node being imported; `null`, otherwise.
-     * @param {Array} baseRegister - The SystemJS register returned by 
-     * the base implementation, {@link SystemJS#instantiate}. Assuming it is defined.
-     * 
-     * @return {Array} A SystemJS register.
-     * @private
-     */
-    __instantiateEnd: function(loadUrl, importNode, baseRegister) {
-      
-      this.__processAmdDefs(loadUrl);
-
-      if (importNode !== null) {
-        return this.__nameRegistry[importNode.url] || EMTPY_AMD_REGISTER;
-      }
-
-      return baseRegister;
-    },
-
     /**
      * Queues an AMD (module definition).
      * 
@@ -541,6 +508,13 @@
       
       if (this.__amdDefQueue.length > 0) {
         
+        /**
+         * The node of the script being loaded.
+         * 
+         * Make sure to remove the fragment to obtain the underlying _plugin_ or _bundle_ node.
+         * 
+         * @type {SimpleNode}
+         */
         let loadNode = this.__amdNodeOfUrl(removeUrlFragment(loadUrl));
 
         let amdDef;
@@ -578,7 +552,7 @@
         // - If the node has no defined bundle, `loadNode` could be it.
         // - If the node has no defined fixedPath, `loadNode.url` could be it.
         if (isNamedDefinition && definedNode !== loadNode && definedNode.bundle !== loadNode) {
-          throw new Error("Module with undeclared path or bundle.");
+          throw new Error("AMD named define for a module without a configured path or bundle.");
         }
 
         if (url === null) {
@@ -669,6 +643,9 @@
    *               .isNormalized: varies
    *               .plugin:       SimpleNode
    *               .resourceName: string?
+   * 
+   * 
+   * RegularNode := SimpleNode | AnonymousNode
    * ```
    *
    * @name AbstractNode
@@ -975,8 +952,11 @@
     __normalizePluginResource: function(normalizedPluginId, resourceName) {
 
       // If the plugin is loaded, use it to normalize resourceName.
-      const plugin = resolveUseDefault(this.get(normalizedPluginId));
+      const plugin = this.root.getOrCreate(normalizedPluginId).registeredExports;
       if (!plugin) {
+        // TODO: When/If `SystemJS#resolve` becomes async, consider loading the plugin to avoid the `__unnormalized` workaround.
+        // This probably causes several other methods to have to return Promises (e.g. createAmdRegister).
+        
         // Already marked unnormalized?
         if (isUnnormalizedId(resourceName)) {
           return resourceName;
@@ -1134,6 +1114,10 @@
 
     get amdModule() {
       return this.__amdModule;
+    },
+
+    get registeredExports() {
+      return resolveUseDefault(this.root._systemJS.get(this.url)) || null;
     },
 
     /**
@@ -1786,7 +1770,7 @@
     },
 
     /** 
-     * Gets the associated resource identifier.
+     * Gets the associated resource name.
      * 
      * @type {string}
      * @readonly
@@ -1795,10 +1779,67 @@
       return this.__resourceName;
     },
 
+    /** 
+     * Gets the associated original resource name.
+     * 
+     * When the resource is normalized, returns {@link ResourceNode#resourceName}.
+     * Otherwise, returns `resourceName` without the unnormalized mark -- the original resource name.
+     * 
+     * @type {string}
+     * @readonly
+     */
+    get originalResourceName() {
+      return this.isNormalized ? this.resourceName : this.resourceName.replace(RE_RESOURCE_ID_UNNORMALIZED, "");
+    },
+
+    get originalId() {
+      return this.isNormalized ? this.id : (this.plugin.id + RESOURCE_SEPARATOR + this.originalResourceName);
+    },
+
     /** @override */
     get _unbundledUrl() {
       // plugin.js#!mid=plugin/id!resource/name
       return setUrlFragment(this.plugin.url, URL_MODULE_FRAGMENT + this.id); 
+    },
+
+    loadWithPlugin: function(pluginInstance, referralNode) {
+
+      if (DEBUG && !this.isNormalized) {
+        throw new Error("Invalid operation.");
+      }
+
+      const resourceNode = this;
+
+      return new Promise(function(resolve, reject) {
+        
+        const config = {};
+        
+        const onLoadCallback = createOnloadCallback(resolve, reject);
+
+        pluginInstance.load(resourceNode.resourceName, referralNode.require, onLoadCallback, config);
+      });
+
+      // ---
+
+      function createOnloadCallback(resolve, reject) {
+
+        function onLoadCallback(value) {
+          resolve(value);
+        }
+
+        onLoadCallback.error = reject;
+
+        onLoadCallback.fromText = function(text, textAlt) {
+          if (textAlt) {
+            text = textAlt;
+          }
+
+          // eval
+          // define is called..
+        };
+
+        return onLoadCallback;
+      }
     }
   });
   // #endregion
@@ -2255,7 +2296,7 @@
     function requireManyAsync(depRefs, callback, errback) {
 
       // For dependencies which are _not_ AMD special dependencies.
-      const registerPromises = [];
+      const waitPromises = [];
 
       const L = depRefs.length;
       const depValues = new Array(L);
@@ -2265,16 +2306,16 @@
           if (hasDep) {
             depValues[i] = value;
           } else {
-            const promise = systemJS.import(normalizedDepRef)
+            const waitPromise = systemJS.import(normalizedDepRef)
               .then(createDepSetter(depValues, i));
   
-            registerPromises.push(promise);
+            waitPromises.push(waitPromise);
           }
         });
       }
 
       Promise
-        .all(registerPromises)
+        .all(waitPromises)
         .then(function() {
           callback.apply(null, depValues);
         }, errback);
@@ -2637,7 +2678,7 @@
       : (url.substring(0, index) + fragment);
   }
 
-  // "/a" - origin relative 
+  // "/a" - origin relative
   // "//a" - protocol relative
   // "http://" - absolute
   function isAbsoluteUrl(text) {
@@ -2661,6 +2702,13 @@
 
   function isUnnormalizedId(id) {
     return RE_RESOURCE_ID_UNNORMALIZED.test(id);
+  }
+
+  function constantRegister(value) {
+    return [[], function(_export) {
+      _export({ default: value, __useDefault: true });
+      return {};
+    }];
   }
   // #endregion
 
