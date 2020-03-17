@@ -17,20 +17,23 @@
  // Portions of the following code are based on https://github.com/requirejs/requirejs.
 
 (function(global) {
+  
+  "use strict";
 
   const DEBUG = true;
   const O_HAS_OWN = Object.prototype.hasOwnProperty;
   const REQUIRE_EXPORTS_MODULE = ["require", "exports", "module"];
   const EMTPY_AMD_REGISTER = constantRegister();
   const MAP_SCOPE_ANY_MODULE = "*";
+  
   const RE_JS_EXT = /\.js$/i;
   // Absolute or Protocol Relative or Origin Relative
   const RE_URL_ABSOLUTE = /^\/|[\w\+\.\-]+:/i;
   const RE_URL_BLOB = /^blob:/i;
   const RE_URL_DATA_OR_BLOB = /^(data|blob):/i;
   const RE_RESOURCE_ID_UNNORMALIZED = /_unnormalized\d+$/;
-  const RESOURCE_SEPARATOR = "!";
   const RESOURCE_UNNORMALIZED = "_unnormalized";
+  const RESOURCE_SEPARATOR = "!";
   const URL_MODULE_FRAGMENT = "#!mid=";
   const isBrowser = typeof window !== "undefined" && typeof navigator !== "undefined" && !!window.document;
 
@@ -859,6 +862,7 @@
       const names = normalizedId.split("/");
       const L = names.length;
       let i = -1;
+      let node;
       while ((++i < L) && (node = parent.childByName(names[i], createIfMissing, createDetached)) !== null) {
         parent = node;
       }
