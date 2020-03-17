@@ -87,13 +87,21 @@
 	}
 	
 	// ---
-	function assertNormalize(id, expectedUrl) {
-		assert.equal(System.amd.normalizeDep(id), expectedUrl)
+	function assertNormalize(id, expectedId) {
+		let normalizedId = System.amd.normalizeDep(id);
+		if (normalizedId) {
+			normalizedId = normalizedId.replace(/_unnormalized\d+$/, "_unnormalized");
+		}
+
+		assert.equal(normalizedId, expectedId);
 	}
 
 	function assertResolve(id, expectedUrl) {
-		const url = System.resolve(id);
-		
+		let url = System.resolve(id);
+		if (url) {
+			url = url.replace(/_unnormalized\d+$/, "_unnormalized");
+		}
+
 		assert.equal(url, expectedUrl);
 	}
 
@@ -125,11 +133,14 @@
 			assertNormalize("amd-tests-global-alias", "amd-tests");
 			assertNormalize("amd-tests-global-alias/amd-anonymous", "amd-tests/amd-anonymous");
 			assertNormalize("amd-tests/amd-bundleA", "amd-tests/amd-bundleA");
+			assertNormalize("amd-tests/amd-pluginA", "amd-tests/amd-pluginA");
+			assertNormalize("amd-tests/amd-pluginA!foo", "amd-tests/amd-pluginA!foo_unnormalized");
 		},
 		function() {
 			assertResolve("amd-tests/amd-anonymous", baseUrl + "src/temp/tests/amd-anonymous.js#!mid=amd-tests/amd-anonymous");
 			assertResolve("amd-tests/amd-module-dep", baseUrl + "src/temp/tests/amd-module-dep.js#!mid=amd-tests/amd-module-dep");
 			assertResolve("amd-tests-global-alias/amd-anonymous", baseUrl + "src/temp/tests/amd-anonymous.js#!mid=amd-tests/amd-anonymous");
+			assertResolve("amd-tests/amd-pluginA!foo", baseUrl + "src/temp/tests/amd-pluginA.js#!mid=amd-tests/amd-pluginA!foo_unnormalized");
 		},
 		function() {
 			assertCanonicalId(baseUrl + "src/temp/tests/amd-anonymous.js", "amd-tests/amd-anonymous");
