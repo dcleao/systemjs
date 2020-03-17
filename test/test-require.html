@@ -51,6 +51,14 @@
 				"A": "amd-tests/amd-dependencyA"
 			}
 		},
+		"shim": {
+			"amd-tests/amd-shimmed": {
+				"deps": ["./amd-dependencyA", "amd-tests/amd-dependencyB"],
+				"exports": "myGlobal.prop",
+				"init": function(depA, depB) {
+				}
+			}
+		},
 		"bundles": {
 			"amd-tests/amd-bundleA": [
 				"amd-bundleA-bundled-module1",
@@ -147,6 +155,11 @@
 		},
 		function() {
 			return System.import("amd-tests/amd-plugin-dep");
+		},
+		function() {
+			return System.import("amd-tests/amd-shimmed").then(function(value) {
+				return assert.equal(value, "amd-shimmed");
+			});
 		},
 		function() {
 			assertNormalize("amd-tests/amd-anonymous", "amd-tests/amd-anonymous");
