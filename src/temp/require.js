@@ -240,7 +240,7 @@
 
         // named-registry.js extra is loaded after,
         // but still, its `resolve` implementation checks the registry only 
-        // after the base implementation...
+        // after the base implementation, so it's necessary to check it here.
         if (specifier in this.__nameRegistry) {
           return specifier;
         }
@@ -352,9 +352,17 @@
     /** @override */
     instantiate: function(specifier, referralUrl) {
       // named-registry.js extra loaded after.
-      // assert loadUrl not in name registry
+      // assert specifier not in name registry
 
-      // The Named AMD node being imported, if any.
+      /**
+       * The Named AMD node being imported, if any.
+       * 
+       * When `importNode` remains `null` here,
+       * in `__instantiateEnd`, if AMD defines are processed,
+       * an `AnonymousNode` is created to represent `specifier` (an URL).
+       * 
+       * @type {null|SimpleNode|ResourceNode}
+       */
       let importNode = null;
 
       if (isAbsoluteUrl(specifier)) {
@@ -362,7 +370,7 @@
         if (resolvedId !== null) {
           
           importNode = this.amd.getOrCreate(resolvedId);
-          if (importNode.isResource) {
+          if (importNode instanceof ResourceNode) {
             // Load the plugin first.
             return this.import(importNode.plugin.id, referralUrl)
               .then(this.__instantiateResource.bind(this, importNode, referralUrl));
@@ -435,6 +443,10 @@
     __instantiateResource: function(resourceNode, referralUrl, plugin) {
 
       let referralNode = this.__amdNodeOfUrl(referralUrl);
+
+      if (!resourceNode.isNormalized) {
+
+      }
 
       return new Promise(function(resolve, reject) {
         
@@ -735,19 +747,6 @@
      */
 
     /** 
-     * Gets a value that indicates if this module is a resource module.
-     * 
-     * Resource modules have a name and identifier with the structure: `<plugin>!<resource>`.
-     *
-     * @type {boolean}
-     * @readonly
-     * @default false
-     */
-    get isResource() {
-      return false;
-    },
-
-    /** 
      * Gets a value that indicates if the identifier of this module is normalized.
      * 
      * Plugin call modules may not be normalized.
@@ -755,8 +754,6 @@
      * @type {boolean}
      * @readonly
      * @default false
-     * 
-     * @see AbstractNode#isResource
      */
     get isNormalized() {
       return true;
@@ -976,23 +973,37 @@
     },
 
     __normalizePluginResource: function(normalizedPluginId, resourceName) {
+
       // If the plugin is loaded, use it to normalize resourceName.
       const plugin = resolveUseDefault(this.get(normalizedPluginId));
       if (!plugin) {
+        // Already marked unnormalized?
+        if (isUnnormalizedId(resourceName)) {
+          return resourceName;
+        }
+         
         // Mark unnormalized and fix later.
         return resourceName + RESOURCE_UNNORMALIZED + (unnormalizedCounter++);
       }
 
+      return this.__normalizePluginLoadedResource(plugin, resourceName);
+    },
+
+    __normalizePluginLoadedResource: function(plugin, resourceName) {
+      
+      // Remove the unnormalized marker, if one exists.
+      const originalResourceName = resourceName.replace(RE_RESOURCE_ID_UNNORMALIZED, "");
+
       if (plugin.normalize) {
-        return plugin.normalize(resourceName, this.normalizeResource.bind(this));
+        return plugin.normalize(originalResourceName, this.normalizeResource.bind(this));
       }
       
       // Per RequireJS, nested plugin calls would not normalize correctly...
-      if (isResourceId(resourceName)) {
-        return resourceName; 
+      if (isResourceId(originalResourceName)) {
+        return originalResourceName; 
       }
       
-      return this.normalizeResource(resourceName);
+      return this.normalizeResource(originalResourceName);
     },
 
     // Default normalization used when loader plugin does not have a normalize method.
@@ -1252,8 +1263,9 @@
     // module
     // bundle
     // plugin
-    // plugin!./resource
-    // plugin!./resource_unnormalized123
+    // For resources, the name is the whole id
+    // plugin-id!./resource-name
+    // plugin-id!./resource-name_unnormalized123
     this.__name = name;
 
     // parent-id/child-name
@@ -1736,7 +1748,7 @@
    */
   function ResourceNode(name, parent, isDetached) {
 
-    const isUnnormalized = RE_RESOURCE_ID_UNNORMALIZED.test(name);
+    const isUnnormalized = isUnnormalizedId(name);
 
     // All unnormalized nodes are necessarily detached.
     const isDetachedEf = isUnnormalized || !!isDetached
@@ -1756,11 +1768,6 @@
   }
 
   classExtend(ResourceNode, AbstractNamedNode, /** @lends ResourceNode# */{
-    /** @override */
-    get isResource() {
-      return true;
-    },
-
     /** @override */
     get isNormalized() {
       return this.__isNormalized;
@@ -2650,6 +2657,10 @@
 
   function isResourceId(id) {
     return !!id && id.indexOf(RESOURCE_SEPARATOR) >= 0;
+  }
+
+  function isUnnormalizedId(id) {
+    return RE_RESOURCE_ID_UNNORMALIZED.test(id);
   }
   // #endregion
 
