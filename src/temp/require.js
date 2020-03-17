@@ -69,7 +69,6 @@
   // 
   // Require
   // -------
-  // TODO: require.toUrl ***
   // TODO: root.require.undef ***
   // TODO: require.defined
   // TODO: require.specified
@@ -634,6 +633,7 @@
    *      |  .parent:     != null
    *      |  .isDetached: boolean
    *      |  .url:        string?
+   *      |  .getUrl(extension) : string?
    *      |  .amdModule:  object?  <- `define(["module"])` <-- not for resources, unless bundled!!!
    *      |
    *      +- AnonymousNode  (URL-only modules; not "bundleable"; parent is root)
@@ -647,7 +647,7 @@
    *          | .id:            != null
    *          | .isDetached:    varies
    *          | .bundle:        SimpleNode?  [.configBundle(.)]
-   *          | ._unbundledUrl: string?
+   *          | ._getUnbundledUrl(extension) : string?
    *          |
    *          +- SimpleNode
    *          |   .fixedPath: string?         [.path, .configPath(.), .configPackage(.)]
@@ -1050,6 +1050,77 @@
         prefixId = prefixId.substring(0, prefixIndex);
       }
     },
+
+    /**
+     * Gets the url for a module having this module's name, optionally with a given extension.
+     * 
+     * For purposes of better supporting canonicalIdByUrl and 
+     * to integrate better with SystemJS's resolve semantics,
+     * module URLs include a fragment annotation.
+     * 
+     * ## URL of a Regular Module
+     * 
+     * Unbundled:
+     * - simple.js#!mid=simple/id - simple module - module which has no special role;
+     * - plugin.js#!mid=plugin/id - plugin module - module which has the resource loader role;
+     * - bundle.js#!mid=bundle/id - bundle module - module which has the bundling role; typically, itself has an undefined value;
+     * 
+     * Bundled:
+     * - bundle.js#!mid=simple/id - simple module which has been bundled;
+     * - bundle.js#!mid=plugin/id - plugin module which has been bundled;
+     * 
+     * ## URL of a Resource Module
+     * 
+     * Unbundled:
+     * - plugin.js#!mid=plugin/id!resource-id - resource module, when resolved client-side
+     * - plugin.js#!mid=plugin/id!resource-id_unnormalized123 - unnormalized resource module, when resolved client-side.
+     * 
+     * Bundled:
+     * - bundle.js#!mid=plugin/id!resource-id - resource module, when processed server-side and bundled (always normalized).
+     * 
+     * The URL is determined from the module's {@link AbstractNode#id}
+     * using the following procedure:
+     * 
+     * TODO: review procedure description
+     * 1. if this.bundle
+     *    return this.bundle.url
+     * 2. let loadId <- this.id
+     *    let regularUrl <- this.url
+     * 2. if this.bundle:
+     *    loadId = this.bundle.id
+     *    regularUrl = this.bundle.url
+     * 3. let regularUrl <- path(loadId)
+     *    if no path then url <- null
+     *    return url
+     * 4. if not (regularUrl is "data:..." or "blob:..." URL or has a "?")
+     *    regularUrl = regularUrl + ".js"
+     * 5. if not (regularUrl is "/..." or "//..." or "pro+to-col:...")
+     *    regularUrl = this.baseUrl + regularUrl
+     * 4. let url = regularUrl
+     * 5. if this.urlArgs and not url is "blob:...":
+     *    url = url + this.urlArgs(load-id, url)
+     * 6. url <- setUrlFragment(url, "#!mid=<id>")
+     * 
+     * @param {string?} [extension=] - The extension to use (e.g. `".css"`).
+     * When `null`, no extension is used.
+     * When `undefined`, the default extension is used (`".js"` for simple modules).
+     * 
+     * @return {string?} The url if one can be determined; `null`, otherwise.
+     * @virtual
+     */
+    getUrl: function(extension) {
+      return null;
+    },
+
+    /**
+     * Gets the URL of this module.
+     * 
+     * @type {string}
+     * @readonly
+     */
+    get url() {
+      return this.getUrl();
+    },
     // #endregion
 
     configMap: function(mapSpec) {
@@ -1239,8 +1310,8 @@
     },
 
     /** @override */
-    get url() {
-      return this.__url;
+    getUrl: function(extension) {
+      return extension ? (this.__url + extension) : this.__url;
     },
 
     /** @override */
@@ -1334,76 +1405,29 @@
       }
     },
 
-    /**
-     * Gets the URL of this module.
-     * 
-     * For purposes of better supporting canonicalIdByUrl and 
-     * to integrate better with SystemJS's resolve semantics,
-     * module URLs include a fragment annotation.
-     * 
-     * ## URL of a Regular Module
-     * 
-     * Unbundled:
-     * - simple.js#!mid=simple/id - simple module - module which has no special role;
-     * - plugin.js#!mid=plugin/id - plugin module - module which has the resource loader role;
-     * - bundle.js#!mid=bundle/id - bundle module - module which has the bundling role; typically, itself has an undefined value;
-     * 
-     * Bundled:
-     * - bundle.js#!mid=simple/id - simple module which has been bundled;
-     * - bundle.js#!mid=plugin/id - plugin module which has been bundled;
-     * 
-     * ## URL of a Resource Module
-     * 
-     * Unbundled:
-     * - plugin.js#!mid=plugin/id!resource-id - resource module, when resolved client-side
-     * - plugin.js#!mid=plugin/id!resource-id_unnormalized123 - unnormalized resource module, when resolved client-side.
-     * 
-     * Bundled:
-     * - bundle.js#!mid=plugin/id!resource-id - resource module, when processed server-side and bundled (always normalized).
-     * 
-     * The URL is determined from the module's {@link AbstractNode#id}
-     * using the following procedure:
-     * 
-     * TODO: review procedure description
-     * 1. if this.bundle
-     *    return this.bundle.url
-     * 2. let loadId <- this.id
-     *    let regularUrl <- this.url
-     * 2. if this.bundle:
-     *    loadId = this.bundle.id
-     *    regularUrl = this.bundle.url
-     * 3. let regularUrl <- path(loadId)
-     *    if no path then url <- null
-     *    return url
-     * 4. if not (regularUrl is "data:..." or "blob:..." URL or has a "?")
-     *    regularUrl = regularUrl + ".js"
-     * 5. if not (regularUrl is "/..." or "//..." or "pro+to-col:...")
-     *    regularUrl = this.baseUrl + regularUrl
-     * 4. let url = regularUrl
-     * 5. if this.urlArgs and not url is "blob:...":
-     *    url = url + this.urlArgs(load-id, url)
-     * 6. url <- setUrlFragment(url, "#!mid=<id>")
-     * 
-     * @type {string?}
-     * @readonly
-     * @override
-     */
-    get url() {
+    /** @override */
+    getUrl: function(extension) {
       const bundle = this.bundle;
       if (bundle !== null) {
         // bundle.js#!mid=bundled/module/id
-        return setUrlFragment(bundle.url, URL_MODULE_FRAGMENT + this.id);
+        return setUrlFragment(bundle.getUrl(extension), URL_MODULE_FRAGMENT + this.id);
       }
 
-      return this._unbundledUrl;
+      return this._getUnbundledUrl(extension);
     },
 
     /**
      * Gets the URL of this module for the case where it is not bundled.
      * 
-     * @name _unbundledUrl
+     * @name _getUnbundledUrl
      * @memberof AbstractNamedNode#
-     * @type {string?}
+     * @method
+     * @param {string?} [extension=] - The extension to use (e.g. `".css"`).
+     * When `null`, no extension is used.
+     * When `undefined`, the default extension is used (`".js"` for simple modules).
+     * 
+     * @return {string?} The URL.
+     * 
      * @readonly
      * @abstract
      * @protected
@@ -1624,14 +1648,23 @@
     },
 
     /** @override */
-    get _unbundledUrl() {
+    _getUnbundledUrl: function(extension) {
       let url = this.__regularUrl;
       if (url !== null) {
         
-        // Add .js extension.
-        const isDataOrBlobUrl = RE_URL_DATA_OR_BLOB.test(url);
-        if (!isDataOrBlobUrl && url.indexOf("?") < 0) {
-          url += ".js";
+        // Add extension.
+        // If extension is `null` don't add.
+        // If extension is `undefined` add default (for certain cases).
+        // Else add it unconditionally.
+        if (extension !== null) {
+          if (extension === undefined) {
+            // Default extension.
+            if (!isDataOrBlobUrl(url) && url.indexOf("?") < 0) {
+              url += ".js";
+            }
+          } else {
+            url += extension;
+          }
         }
         
         const urlArgs = this.root.urlArgs;
@@ -1852,9 +1885,10 @@
     },
 
     /** @override */
-    get _unbundledUrl() {
+    _getUnbundledUrl: function(extension) {
       // plugin.js#!mid=plugin/id!resource/name
-      return setUrlFragment(this.plugin.url, URL_MODULE_FRAGMENT + this.id); 
+      // bundle.js#!mid=plugin/id!resource/name (when the plugin itself is bundled?)
+      return setUrlFragment(this.plugin.getUrl(extension), URL_MODULE_FRAGMENT + this.id); 
     },
 
     loadWithPlugin: function(pluginInstance, referralNode) {
@@ -2322,7 +2356,45 @@
     return objectCopy(require, {
       isBrowser: isBrowser,
 
+      /**
+       * Gets the url of a given module name, optionally with an extension, relative to this module.
+       * 
+       * The extension, if present, is preserved. The default ".js" extension is not added in any case.
+       * 
+       * @param {string} moduleNamePlusExt - The module name plus an optional extension.
+       * 
+       * @return {string?} The url if one can be determined; `null`, otherwise.
+       */
       toUrl: function(moduleNamePlusExt) {
+        
+        let lastIndex = moduleNamePlusExt.lastIndexOf('.');
+
+        // Is it a real extension?
+        // "."
+        // ".."
+        // ".ext"
+        // "../foo"
+        // "../foo.ext"
+        let isExtension = lastIndex !== -1;
+        if (isExtension) {
+          let isNotRelative = moduleNamePlusExt.indexOf('.') > 0;
+          isExtension = (isNotRelative || lastIndex >= 2);
+        }
+
+        let moduleName, extension;
+        if (isExtension) {
+          // "../foo" and ".ext"
+          moduleName = moduleNamePlusExt.substring(0, lastIndex);
+          extension = moduleNamePlusExt.substring(lastIndex);
+        } else {
+          moduleName = moduleNamePlusExt;
+          // `null` <=> use no extension.
+          extension = null;
+        }
+        
+        moduleName = node.normalizeDep(moduleName);
+
+        return rootNode.getOrCreateDetached(moduleName).getUrl(extension);
       },
 
       defined: function(id) {
@@ -2743,6 +2815,10 @@
   // "http://" - absolute
   function isAbsoluteUrl(text) {
     return !!text && RE_URL_ABSOLUTE.test(text);
+  }
+
+  function isDataOrBlobUrl(text) {
+    return RE_URL_DATA_OR_BLOB.test(text);
   }
 
   function isBareName(text) {

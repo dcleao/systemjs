@@ -162,6 +162,11 @@
 			});
 		},
 		function() {
+			return assert.equal(
+				require.toUrl("amd-tests/amd-module-dep.css"), 
+				baseUrl + "src/temp/tests/amd-module-dep.css#!mid=amd-tests/amd-module-dep");
+		},
+		function() {
 			assertNormalize("amd-tests/amd-anonymous", "amd-tests/amd-anonymous");
 			assertNormalize("amd-tests/amd-module-dep", "amd-tests/amd-module-dep");
 			assertNormalize("amd-tests-global-alias", "amd-tests");
