@@ -36,6 +36,8 @@
 
   let unnormalizedCounter = 1;
 
+  // *** - MVP issue.
+  //
   // General
   // -------
   // TODO: Check license.
@@ -51,6 +53,7 @@
   // TODO: .JS <> bare interop? *** 
   //       Compose <node.id> with .js?
   // TODO: trimDots -> absolutizeId ***
+  // TODO: Shared general config?
   // TODO: RequireJS supports mapping regular modules to resource modules.
   // TODO: Implement canonicalIdByUrl for Import Maps URLs.
   // TODO: Flag to not overwrite define, require? Keep backup?
@@ -58,8 +61,6 @@
   //
   // Config
   // ------
-  // TODO: config.shim ***
-  //       Any integration with global.js?
   // TODO: config.deps, config.callback (using setTimout to let any following extras to be installed)
   //       relationship with data-main and `<script type="systemjs-module" src="import:name"></script>`
   // 
@@ -502,21 +503,32 @@
      * @private
      */
     __processAmdDefs: function(loadUrl) {
+      /**
+       * The node of the script being loaded.
+       * 
+       * Make sure to remove the fragment to obtain the underlying _plugin_ or _bundle_ node.
+       * 
+       * @type {AnonymousNodeSimpleNode}
+       */
+      let loadNode = this.__amdNodeOfUrl(removeUrlFragment(loadUrl));
       
+      let foundLoadingModule = false;
+
       if (this.__amdDefQueue.length > 0) {
         
-        /**
-         * The node of the script being loaded.
-         * 
-         * Make sure to remove the fragment to obtain the underlying _plugin_ or _bundle_ node.
-         * 
-         * @type {SimpleNode}
-         */
-        let loadNode = this.__amdNodeOfUrl(removeUrlFragment(loadUrl));
-
         let amdDef;
         while((amdDef = this.__amdDefQueue.shift()) !== undefined) {
-          this.__processAmdDef(loadNode, amdDef.id, amdDef.deps, amdDef.execute);
+          if (this.__processAmdDef(loadNode, amdDef.id, amdDef.deps, amdDef.execute)) {
+            foundLoadingModule = true;
+          }
+        }
+      }
+
+      // Is it a shimmed module? If so, automatically provide a definition for it.
+      if (!foundLoadingModule && (loadNode instanceof SimpleNode)) {
+        const shim = loadNode.shim;
+        if (shim !== null) {
+          this.__processAmdDef(loadNode, null, shim.deps, shim.factory);
         }
       }
     },
@@ -528,6 +540,7 @@
      * @param {string?} id - The AMD identifier of the AMD (definition).
      * @param {Array.<string>} deps - An array of AMD references of the dependencies of the AMD (definition).
      * @param {function} execute - The AMD factory function.
+     * @return {boolean} `true` if an AMD module with the given identifier or that of `loadNode` was found.
      * @private
      */
     __processAmdDef: function(loadNode, id, deps, execute) {
@@ -557,17 +570,20 @@
         }
       }
 
-      // Valid way to test if a module has already been defined?
+      // TODO: Valid way to test if a module has already been defined?
       // Through the API, node.require can ask for module even if the module has not been loaded.
       if (definedNode.amdModule !== null) {
         this.__log("Module '" + (definedNode.id || url) + "' is already defined. Ignoring.", "warn");
-        return;
+        return false;
       }
 
       // Create the register.
       // Let any other extras _transform_ it by making it go through `getRegister`.
       // Save it in the named register. No other way to register multiple modules by URL loaded by a single URL...
       this.__nameRegistry[url] = this._processRegister(createAmdRegister(definedNode, deps, execute));
+
+      // Was it anonymous or the named, loaded script?
+      return !isNamedDefinition || (definedNode.id === loadNode.id);
     },
 
     get __nameRegistry() {
@@ -631,9 +647,10 @@
    *          | ._unbundledUrl: string?
    *          |
    *          +- SimpleNode
-   *          |   .fixedPath: string?      [.path, .configPath(.), .configPackage(.)]
-   *          |   .main:      SimpleNode?  [.configPackage(.)]
-   *          |   .config:    object?      [.configConfig(.)]
+   *          |   .fixedPath: string?         [.path, .configPath(.), .configPackage(.)]
+   *          |   .main:      SimpleNode?     [.configPackage(.)]
+   *          |   .shim       {deps, factory} [.configShim(.)]
+   *          |   .config:    object?         [.configConfig(.)]
    *          |
    *          +- ResourceNode - <plugin>!<resource-name>
    *               .isResource:   true
@@ -1441,6 +1458,14 @@
 
     // `null` means no fixed path was defined (idem)...
     this.__regularUrlCached = undefined;
+
+    /**
+     * The shimming configuration, if any.
+     * 
+     * @type {?({deps: ?Array.<string>, factory: function?})}
+     * @private
+     */
+    this.__shim = null;
   }
 
   const baseNamedNodeInvalidateUrl = AbstractNamedNode.prototype._invalidateRegularUrl;
@@ -1539,7 +1564,14 @@
       return this.__config;
     },
 
+    get shim() {
+      return this.__shim;
+    },
+
     configConfig: function(config) {
+
+      this._assertAttached();
+
       if (!this.__config) {
         this.__config = {};
       }
@@ -1557,12 +1589,34 @@
     },
     
     configPath: function(pathSpec) {
-      
-      if (Array.isArray(pathSpec)) {
-        pathSpec = pathSpec[0];
+      if (pathSpec) {
+        if (Array.isArray(pathSpec)) {
+          pathSpec = pathSpec[0];
+        }
+
+        this.fixedPath = pathSpec;
+      }
+    },
+
+    configShim: function(shimSpec) {
+
+      this._assertAttached();
+
+      const shim = {deps: null, factory: null};
+
+      if (Array.isArray(shimSpec)) {
+        shim.deps = shimSpec.slice(0);
+      } else {
+        if (shimSpec.deps) {
+          shim.deps = shimSpec.deps.slice(0);
+        }
+
+        if (shimSpec.exports || shimSpec.init) {
+          shim.factory = createShimFactory(shimSpec);
+        }
       }
 
-      this.fixedPath = pathSpec;
+      this.__shim = (shim.deps || shim.factory) ? shim : null;
     },
 
     /** @override */
@@ -2031,6 +2085,13 @@
         return root.getOrCreate(assertSimple(id));
       }
 
+      function processObjectConfig(configById, configMethodName, allowStar) {
+        eachOwn(configById, function(config, id) {
+          const node = allowStar && id === MAP_SCOPE_ANY_MODULE ? root : getOrCreateSingle(id);
+          node[configMethodName](config);
+        });
+      }
+
       if (config.packages) {
         config.packages.forEach(function(pkgSpec) {
           if (pkgSpec) {
@@ -2043,26 +2104,11 @@
         });
       }
 
-      eachOwn(config.paths, function(pathSpec, id) {
-        if (pathSpec) {
-          getOrCreateSingle(id).configPath(pathSpec);
-        }
-      });
-      
-      eachOwn(config.map, function(mapSpec, id) {
-        if (mapSpec) {
-          const node = id === MAP_SCOPE_ANY_MODULE ? root : getOrCreateSingle(id);
-          node.configMap(mapSpec);
-        }
-      });
-
-      eachOwn(config.bundles, function(bundleSpec, id) {
-        getOrCreateSingle(id).configBundle(bundleSpec);
-      });
-
-      eachOwn(config.config, function(config, id) {
-        getOrCreateSingle(id).configConfig(config);
-      });
+      processObjectConfig(config.paths, "configPath");
+      processObjectConfig(config.map, "configMap", true);
+      processObjectConfig(config.shim, "configShim");
+      processObjectConfig(config.config, "configConfig");
+      processObjectConfig(config.bundles, "configBundle");
     },
 
     /**
@@ -2429,6 +2475,19 @@
       } // else, `deps` is an array and assuming but not checking that `execute` is a fun...
 
       rootNode._systemJS.__queueAmdDef(id, deps, execute);
+    }
+  }
+
+  function createShimFactory(shimSpec) {
+      
+    const exportedPath = shimSpec.exports || undefined;
+    const init = shimSpec.init || undefined;
+
+    return shimFactory;
+
+    // Called with the dependencies' values as arguments.
+    function shimFactory() {
+      return (init && init.apply(global, arguments)) || getGlobal(exportedPath);
     }
   }
 
