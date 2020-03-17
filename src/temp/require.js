@@ -44,13 +44,10 @@
   // TODO: Support for other environments (Rhino?).
   // TODO: "Minify" code / identifiers / structure.
   // TODO: Complete/Review documentation
-  //       - Document `require` functions.
   // TODO: Unit tests...
-  // TODO: Check loading order of dependency extras
   // 
   // General Features
   // ----
-  // TODO: Plugins, _unnormalized ids ***
   // TODO: .JS <> bare interop? *** 
   //       Compose <node.id> with .js?
   // TODO: trimDots -> absolutizeId ***
