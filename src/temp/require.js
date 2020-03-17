@@ -613,7 +613,7 @@
    * AbstractNode
    *  |  .name:         string? : null
    *  |  .id:           string? : null
-   *  |  .children:     Array.<NamedNode>? = null (attached, named child nodes)
+   *  |  .children:     Array.<AbstractNamedNode>? = null (attached, named child nodes)
    *  |  .parent:       (SimpleNode | RootNode)?
    *  |  .root:         RootNode
    *  |  .isResource:   boolean : false
@@ -640,7 +640,7 @@
    *      |    .isDetached: = true
    *      |    .parent:     = root
    *      |
-   *      +- NamedNode
+   *      +- AbstractNamedNode
    *          | .name:          != null
    *          | .id:            != null
    *          | .isDetached:    varies
@@ -683,7 +683,7 @@
     /**
      * Gets the array of attached child nodes. Lazily created.
      * 
-     * @type {Array.<NamedNode>?}
+     * @type {Array.<AbstractNamedNode>?}
      * @readonly
      * @private
      */
@@ -692,7 +692,7 @@
     /**
      * Gets the map of attached child nodes by their name.  Lazily created.
      * 
-     * @type {Object.<string, NamedNode>}
+     * @type {Object.<string, AbstractNamedNode>}
      * @readonly
      * @private
      */
@@ -806,7 +806,7 @@
     /**
      * Gets the array of attached child modules, if any; `null` otherwise.
      * 
-     * @type {Array.<NamedNode>?}
+     * @type {Array.<AbstractNamedNode>?}
      * @readonly
      */
     get children() {
@@ -823,7 +823,7 @@
      * should be created detached from their parents.
      * Only applies if `createIfMissing` is `true`.
      * 
-     * @return {NamedNode?} The child node, if any; `null` otherwise.
+     * @return {AbstractNamedNode?} The child node, if any; `null` otherwise.
      */
     childByName: function(name, createIfMissing, createDetached) {
       let child = getOwn(this.__byName, name) || null;
@@ -844,7 +844,7 @@
     /** 
      * Adds the given child module to the list of children.
      * 
-     * @param {NamedNode} child - The child module.
+     * @param {AbstractNamedNode} child - The child module.
      * @private
      * @internal
      */
@@ -1237,8 +1237,8 @@
   });
   // #endregion
   
-  // #region NamedNode Class
-  function NamedNode(name, parent, isDetached) {
+  // #region AbstractNamedNode Class
+  function AbstractNamedNode(name, parent, isDetached) {
 
     if (DEBUG && (!name || !parent)) {
       throw new Error("Invalid arguments.");
@@ -1269,7 +1269,7 @@
     }
   }
 
-  classExtend(NamedNode, AbstractChildNode, /** @lends NamedNode# */{
+  classExtend(AbstractNamedNode, AbstractChildNode, /** @lends AbstractNamedNode# */{
     /** @override */
     get isDetached() {
       return this.__isDetached;
@@ -1288,7 +1288,7 @@
     /**
      * Gets or sets this modules's bundle module.
      * 
-     * @type {NamedNode?}
+     * @type {AbstractNamedNode?}
      */
     get bundle() {
       return this.__bundle;
@@ -1388,7 +1388,7 @@
      * Gets the URL of this module for the case where it is not bundled.
      * 
      * @name _unbundledUrl
-     * @memberof NamedNode#
+     * @memberof AbstractNamedNode#
      * @type {string?}
      * @readonly
      * @abstract
@@ -1433,7 +1433,7 @@
       throw new Error("Resource must be child of root.");
     }
 
-    NamedNode.apply(this, arguments);
+    AbstractNamedNode.apply(this, arguments);
 
     this.__config = null;
 
@@ -1450,9 +1450,9 @@
     this.__regularUrlCached = undefined;
   }
 
-  const baseNamedNodeInvalidateUrl = NamedNode.prototype._invalidateRegularUrl;
+  const baseNamedNodeInvalidateUrl = AbstractNamedNode.prototype._invalidateRegularUrl;
 
-  classExtend(SimpleNode, NamedNode, /** @lends SimpleNode# */{
+  classExtend(SimpleNode, AbstractNamedNode, /** @lends SimpleNode# */{
     /**
      * Gets the main module of this module.
      * 
@@ -1463,9 +1463,9 @@
      * even when a bare name (without starting with `./`).
      * If the value has the extension `.js`, if is removed.
      * 
-     * @type {NamedNode?}
+     * @type {AbstractNamedNode?}
      * @readonly
-     * @see NamedNode#setMain
+     * @see AbstractNamedNode#setMain
      */
     get main() {
       return this.__main;
@@ -1481,7 +1481,7 @@
      * even when a bare name (without starting with `./`).
      * If the value has the extension `.js`, it is removed.
      * 
-     * @see NamedNode#main
+     * @see AbstractNamedNode#main
      */
     setMain: function(relativeId) {
 
@@ -1498,13 +1498,13 @@
      * When relative, it is relative to the root module's
      * {@link RootNode#baseUrl}.
      * When not specified, 
-     * the path is built from the parent module's [path]{@link NamedNode#path} 
+     * the path is built from the parent module's [path]{@link AbstractNamedNode#path} 
      * and this module's [name]{@link AbstractNode#name}.
      * 
      * When set, a trailing slash is removed.
      * 
      * @type {string?}
-     * @see NamedNode#path
+     * @see AbstractNamedNode#path
      */
     get fixedPath() {
       return this.__fixedPath;
@@ -1526,8 +1526,8 @@
     /**
      * Gets the effective path of this module, if one can be determined; `null`, otherwise.
      * 
-     * When {@link NamedNode#fixedPath} is specified, it is returned.
-     * Otherwise, the path is built from the parent module's [path]{@link NamedNode#path} 
+     * When {@link AbstractNamedNode#fixedPath} is specified, it is returned.
+     * Otherwise, the path is built from the parent module's [path]{@link AbstractNamedNode#path} 
      * and this module's [name]{@link AbstractNode#name}.
      * If the none of the ascendant modules has a specified `fixedPath`, `null` is returned.
      * 
@@ -1741,7 +1741,7 @@
     // All unnormalized nodes are necessarily detached.
     const isDetachedEf = isUnnormalized || !!isDetached
     
-    NamedNode.call(this, name, parent, isDetachedEf);
+    AbstractNamedNode.call(this, name, parent, isDetachedEf);
 
     const resourceIdParts = parseResourceId(this.id);
 
@@ -1755,7 +1755,7 @@
     this.__isNormalized = !isUnnormalized;
   }
 
-  classExtend(ResourceNode, NamedNode, /** @lends ResourceNode# */{
+  classExtend(ResourceNode, AbstractNamedNode, /** @lends ResourceNode# */{
     /** @override */
     get isResource() {
       return true;
@@ -1771,7 +1771,7 @@
      * 
      * Must not itself be a resource module.
      * 
-     * @type {NamedNode}
+     * @type {AbstractNamedNode}
      * @readonly
      */
     get plugin() {
@@ -1817,7 +1817,7 @@
     /**
      * A map of all descendant modules by id.
      * 
-     * @type {Object.<string, NamedNode>}
+     * @type {Object.<string, AbstractNamedNode>}
      * @readonly
      * @private
      */ 
@@ -1826,11 +1826,11 @@
     /**
      * A map of all descendant modules by _regular_ URL.
      * 
-     * @type {Object.<string, NamedNode>}
+     * @type {Object.<string, AbstractNamedNode>}
      * @readonly
      * @private
      * 
-     * @see NamedNode#url
+     * @see AbstractNamedNode#url
      */ 
     this.__byUrl = Object.create(null);
 
@@ -2193,14 +2193,14 @@
      * Updates the URL index to account for the change of 
      * _regular URL_ of a descendant node.
      * 
-     * Only called for nodes having (or stopping to have) a {@link NamedNode#fixedPath}.
+     * Only called for nodes having (or stopping to have) a {@link AbstractNamedNode#fixedPath}.
      * 
-     * @param {NamedNode} childNode - The descendant node.
+     * @param {AbstractNamedNode} childNode - The descendant node.
      * @param {string?} regularUrlNew - The new regular URL value.
      * @param {string?} regularUrlOld - The old regular URL value.
      * @internal
      * @private
-     * @see NamedNode#url
+     * @see AbstractNamedNode#url
      */
     __onNodeRegularUrlChanged: function(childNode, regularUrlNew, regularUrlOld) {
       // Don't delete if old regular url is taken by other node.
