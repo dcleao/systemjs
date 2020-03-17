@@ -25,12 +25,15 @@
     _export({ default: undefined, __useDefault: true });
     return {};
   }];
-  const STAR = "*";
+  const MAP_SCOPE_ANY_MODULE = "*";
   const RE_JS_EXT = /\.js$/i;
   // Absolute or Protocol Relative or Origin Relative
   const RE_URL_ABSOLUTE = /^\/|[\w\+\.\-]+:/i;
   const RE_URL_BLOB = /^blob:/i;
   const RE_URL_DATA_OR_BLOB = /^(data|blob):/i;
+  const RE_RESOURCE_ID_UNNORMALIZED = /_unnormalized\d+$/;
+  const RESOURCE_SEPARATOR = "!";
+  const RESOURCE_UNNORMALIZED = "_unnormalized";
   const URL_MODULE_FRAGMENT = "#!mid=";
   const isBrowser = typeof window !== "undefined" && typeof navigator !== "undefined" && !!window.document;
 
@@ -45,7 +48,6 @@
   // TODO: "Minify" code / identifiers / structure.
   // TODO: Complete/Review documentation
   //       - Document `require` functions.
-  //       - Refactor of documentation__instantiateEnd.
   // TODO: Unit tests...
   // TODO: Check loading order of dependency extras
   // 
@@ -55,7 +57,7 @@
   // TODO: .JS <> bare interop? *** 
   //       Compose <node.id> with .js?
   // TODO: trimDots -> absolutizeId ***
-  // TODO: RequireJS supports mapping regular modules (not initially plugin calls) to plugin calls...
+  // TODO: RequireJS supports mapping regular modules to resource modules.
   // TODO: Implement canonicalIdByUrl for Import Maps URLs.
   // TODO: Flag to not overwrite define, require? Keep backup?
   // TODO: Flag to allow top-level modules without a specified path (fallback to `name`)?
@@ -81,15 +83,16 @@
   //       subsume the use of nodes?? Requirejs derives bundleMap and pkgs index properties
   //       from the config.
   // TODO: onload.fromText *** - eval text as if it were a module script being loaded  
-  //       assuming its id is resourceId.
+  //       assuming its id is resourceName.
   //
   // JS
   // ---
   // TODO: __log
   // TODO: "__proto__" map lookup loophole
 
-  // Not Supported
-  //
+  // NOT SUPPORTED
+  // =============
+  // 
   // AMD
   // ---
   // https://github.com/amdjs/amdjs-api
@@ -97,7 +100,7 @@
   // - Modules with paths/URLs with fragments, as they're used for other purposes.
   // - A dependency ending with ".js" being considered an URL and not a module identifier.
   //   - The top-level require's `jsExtRegExp` property; used to filter out dependencies that are already URLs.
-  // - Being able to `map` a regular identifier to a loader plugin call identifier.
+  // - Being able to `map` a regular identifier to a resource identifier.
   // - Being able to specify `paths` fallbacks; when an array is provided, only the first value is considered.
   //
   // RequireJS
@@ -178,10 +181,10 @@
        * Gets the root node of the AMD module's namespace.
        * 
        * @memberof amdSystemJSMixin.
-       * @type {RootModuleNode}
+       * @type {RootNode}
        * @readonly
        */
-      this.amd = new RootModuleNode(this);
+      this.amd = new RootNode(this);
       
       /**
        * Queue of AMD definitions added during the load of a script file
@@ -223,9 +226,7 @@
     },
 
     /** @override */
-    resolve: function(specifier, parentUrl) {
-      // named-registry.js extra loaded after.
-      // assert specifier not in name registry
+    resolve: function(specifier, referralUrl) {
       try {
         // Give precedence to other resolution strategies.
         // Any isAbsoluteUrl(depId) is handled by import maps.
@@ -237,8 +238,15 @@
           throw error;
         }
 
-        const refNode = this.__amdNodeOfUrl(parentUrl);
-        const normalizedId = refNode.normalizeDep(specifier);
+        // named-registry.js extra is loaded after,
+        // but still, its `resolve` implementation checks the registry only 
+        // after the base implementation...
+        if (specifier in this.__nameRegistry) {
+          return specifier;
+        }
+
+        const referralNode = this.__amdNodeOfUrl(referralUrl);
+        const normalizedId = referralNode.normalizeDep(specifier);
         
         // Throw if normalizedId has no assigned URL (i.e. does not have a defined path or bundle).
         const node = this.amd.getOrCreateDetached(normalizedId);
@@ -342,40 +350,28 @@
     },
 
     /** @override */
-    instantiate: function(loadUrl, parentUrl) {
+    instantiate: function(specifier, referralUrl) {
       // named-registry.js extra loaded after.
       // assert loadUrl not in name registry
 
-      // The AMD node corresponding to a regular URL being imported.
+      // The Named AMD node being imported, if any.
       let importNode = null;
 
-      let resolvedId = this.canonicalIdByUrl(loadUrl);
-      if (resolvedId !== null) {
-        // If it's a plugin call, then get the plugin module, first.
-        // Then, call its plugin interface with the argument to determine the composite module (resolvedId).
-        const index = resolvedId.indexOf("!");
-        const isPluginCall = index !== -1;
-        if (isPluginCall) {
-          const pluginId = resolvedId.substring(0, index);
-          const resourceId = resolvedId.substring(index + 1) || null;
+      if (isAbsoluteUrl(specifier)) {
+        const resolvedId = this.canonicalIdByUrl(specifier);
+        if (resolvedId !== null) {
           
-          // Attempt going a bit faster by providing the plugin id url directly?
-          // const pluginUrl = removeUrlFragment(loadUrl) + URL_MODULE_FRAGMENT + pluginId;
-
-          return this.import(pluginId, parentUrl)
-            .then(this.__instantiatePluginCallEnd.bind(this, pluginId, resourceId, parentUrl));
+          importNode = this.amd.getOrCreate(resolvedId);
+          if (importNode.isResource) {
+            // Load the plugin first.
+            return this.import(importNode.plugin.id, referralUrl)
+              .then(this.__instantiateResource.bind(this, importNode, referralUrl));
+          }
         }
-
-        // Get or create the AMD child node.
-        importNode = this.amd.getOrCreate(resolvedId);
-        // loadNode = importNode.bundleOrSelf;
-        // - module.js#!mid=module/id             - the module itself (even if bundle or plugin)
-        // - bundle.js#!mid=bundled/module/id     - a bundled module, within bundle.js
-        // - plugin.js#!mid=plugin/id!resource-id - a plugin call module
       }
-
-      return Promise.resolve(base.instantiate.call(this, loadUrl, parentUrl))
-        .then(this.__instantiateEnd.bind(this, loadUrl, importNode));
+      
+      return Promise.resolve(base.instantiate.call(this, specifier, referralUrl))
+        .then(this.__instantiateEnd.bind(this, specifier, importNode));
     },
 
     /** 
@@ -422,7 +418,7 @@
       }
     },
 
-    // -> AbstractChildModuleNode
+    // -> AbstractChildNode
     __amdNodeOfUrl: function(url) {
       if (url == null) {
         return this.amd;
@@ -430,20 +426,28 @@
 
       let id = this.canonicalIdByUrl(url);
       if (id === null) {
-        return new AnonymousChildModuleNode(url, this.amd);
+        return new AnonymousNode(url, this.amd);
       }
 
       return this.amd.getOrCreateDetached(id);
     },
     
-    __instantiatePluginCallEnd: function(pluginId, resourceId, parentUrl, plugin) {
+    __instantiateResource: function(resourceNode, referralUrl, plugin) {
 
-      // let id = pluginId + "!" + (resourceId || "");
-
-      let refNode = this.__amdNodeOfUrl(parentUrl);
+      let referralNode = this.__amdNodeOfUrl(referralUrl);
 
       return new Promise(function(resolve, reject) {
-        let config = {};
+        
+        const config = {};
+        
+        const onLoadCallback = createOnloadCallback(resolve, reject);
+
+        plugin.load(resourceNode.resourceName, referralNode.require, onLoadCallback, config);
+      });
+
+      // ---
+
+      function createOnloadCallback(resolve, reject) {
 
         function onLoadCallback(value) {
 
@@ -466,12 +470,12 @@
           // define is called..
         };
 
-        plugin.load(resourceId, refNode.require, onLoadCallback, config);
-      });
+        return onLoadCallback;
+      }
     },
 
     /** 
-     * Handles the end phase of instantiation of either a URL or a regular AMD module.
+     * Handles the end phase of instantiation of either an Anonymous or Simple AMD module.
      * 
      * Processes any queued AMD `define` calls by creating and registering the corresponding SystemJS registers.
      * 
@@ -484,7 +488,7 @@
      * It is expected that a script file contains either AMD _or_ SystemJS definitions.
      * 
      * @param {string} loadUrl - The URL of the file being loaded.
-     * @param {ChildModuleNode?} importNode - The AMD child node being imported; `null`, otherwise.
+     * @param {AbstractChildNode?} importNode - The AMD child node being imported; `null`, otherwise.
      * @param {Array} baseRegister - The SystemJS register returned by 
      * the base implementation, {@link SystemJS#instantiate}. Assuming it is defined.
      * 
@@ -537,7 +541,7 @@
     /**
      * Processes an AMD (module definition) and registers a SystemJS register under its URL.
      * 
-     * @param {AbstractChildModuleNode} loadNode - The AMD child node being loaded.
+     * @param {AbstractChildNode} loadNode - The AMD child node being loaded.
      * @param {string?} id - The AMD identifier of the AMD (definition).
      * @param {Array.<string>} deps - An array of AMD references of the dependencies of the AMD (definition).
      * @param {function} execute - The AMD factory function.
@@ -595,30 +599,74 @@
   });
   // #endregion
 
-  // #region AbstractModuleNode Class
+  // #region AbstractNode Class
 
   /**
-   * @classdesc The `AbstractModuleNode` class describes a module in the AMD identifier namespace.
+   * @classdesc The `AbstractNode` class describes a module in the AMD identifier namespace.
    * 
    * AMD modules which have no defined bare name, and thus are loaded directly by URL, 
    * do *NOT* have an associated module node.
    * 
    * ## Class Hierarchy
    * 
-   * `AbstractModuleNode`
-   *   |- `RootModuleNode`
-   *   |- `AbstractChildModuleNode`
-   *        |- `AnonymousChildModuleNode`
-   *        |- `ChildModuleNode`
-   * 
-   * @name AbstractModuleNode
+   * ```
+   * AbstractNode
+   *  |  .name:         string? : null
+   *  |  .id:           string? : null
+   *  |  .children:     Array.<NamedNode>? = null (attached, named child nodes)
+   *  |  .parent:       (SimpleNode | RootNode)?
+   *  |  .root:         RootNode
+   *  |  .isResource:   boolean : false
+   *  |  .isNormalized: boolean : true
+   *  |  .require:      function
+   *  |  .aliasMap:     object    [.configMap(.), .applyMap()]
+   *  |  
+   *  +- RootNode
+   *  |    .name:     = null
+   *  |    .id:       = null
+   *  |    .parent:   = null
+   *  |    .baseUrl:  string : ./ [.configure(.)]
+   *  |    .urlArgs:  function    [.configure(.)]
+   *  |
+   *  +- AbstractChildNode
+   *      |  .parent:     != null
+   *      |  .isDetached: boolean
+   *      |  .url:        string?
+   *      |  .amdModule:  object?  <- `define(["module"])` <-- not for resources, unless bundled!!!
+   *      |
+   *      +- AnonymousNode  (URL-only modules; not "bundleable"; parent is root)
+   *      |    .name:       = null
+   *      |    .id:         = null
+   *      |    .isDetached: = true
+   *      |    .parent:     = root
+   *      |
+   *      +- NamedNode
+   *          | .name:          != null
+   *          | .id:            != null
+   *          | .isDetached:    varies
+   *          | .bundle:        SimpleNode?  [.configBundle(.)]
+   *          | ._unbundledUrl: string?
+   *          |
+   *          +- SimpleNode
+   *          |   .fixedPath: string?      [.path, .configPath(.), .configPackage(.)]
+   *          |   .main:      SimpleNode?  [.configPackage(.)]
+   *          |   .config:    object?      [.configConfig(.)]
+   *          |
+   *          +- ResourceNode - <plugin>!<resource-name>
+   *               .isResource:   true
+   *               .isNormalized: varies
+   *               .plugin:       SimpleNode
+   *               .resourceName: string?
+   * ```
+   *
+   * @name AbstractNode
    * @class
    * 
    * @description Constructs a node.
    * @constructor
    * @param {Object.<string, string>?} aliasMap - The map of aliases to use for this node.
    */
-  function AbstractModuleNode(aliasMap) {
+  function AbstractNode(aliasMap) {
 
     /**
      * Gets the map of identifiers for when this node is the context node.
@@ -635,7 +683,7 @@
     /**
      * Gets the array of attached child nodes. Lazily created.
      * 
-     * @type {Array.<ChildModuleNode>?}
+     * @type {Array.<NamedNode>?}
      * @readonly
      * @private
      */
@@ -644,7 +692,7 @@
     /**
      * Gets the map of attached child nodes by their name.  Lazily created.
      * 
-     * @type {Object.<string, ChldModuleNode>}
+     * @type {Object.<string, NamedNode>}
      * @readonly
      * @private
      */
@@ -658,17 +706,17 @@
      * @type {function}
      * @readonly
      * @private
-     * @see AbstractModuleNode#require
+     * @see AbstractNode#require
      */
     this.__require = null;
   }
 
-  objectCopy(AbstractModuleNode.prototype, /** @lends AbstractModuleNode# */{
+  objectCopy(AbstractNode.prototype, /** @lends AbstractNode# */{
     /**
      * Gets a value that indicates if this module is a root module.
      * 
      * @name isRoot
-     * @memberOf AbstractModuleNode#
+     * @memberOf AbstractNode#
      * @type {boolean}
      * @readonly
      * @abstract
@@ -680,11 +728,39 @@
      * The root node returns itself.
      * 
      * @name root
-     * @memberOf AbstractModuleNode#
-     * @type {RootModuleNode}
+     * @memberOf AbstractNode#
+     * @type {RootNode}
      * @readonly
      * @abstract
      */
+
+    /** 
+     * Gets a value that indicates if this module is a resource module.
+     * 
+     * Resource modules have a name and identifier with the structure: `<plugin>!<resource>`.
+     *
+     * @type {boolean}
+     * @readonly
+     * @default false
+     */
+    get isResource() {
+      return false;
+    },
+
+    /** 
+     * Gets a value that indicates if the identifier of this module is normalized.
+     * 
+     * Plugin call modules may not be normalized.
+     * 
+     * @type {boolean}
+     * @readonly
+     * @default false
+     * 
+     * @see AbstractNode#isResource
+     */
+    get isNormalized() {
+      return true;
+    },
 
     /**
      * Gets the identifier of this module, if any; `null`, otherwise.
@@ -700,8 +776,8 @@
      * Gets the parent module of this module, if any; `null`, otherwise.
      * 
      * @name parent
-     * @memberOf AbstractModuleNode#
-     * @type {AbstractModuleNode?}
+     * @memberOf AbstractNode#
+     * @type {AbstractNode?}
      * @readonly
      * @abstract
      */
@@ -710,7 +786,7 @@
      * Gets the identifier of this module's parent module, if any; `null`, otherwise.
      * 
      * @name parentId
-     * @memberOf AbstractModuleNode#
+     * @memberOf AbstractNode#
      * @type {string?}
      * @readonly
      * @abstract
@@ -727,18 +803,10 @@
       return null;
     },
 
-    /** 
-     * @name configure
-     * @memberOf AbstractModuleNode#
-     * @method
-     * @param {object} config - The configuration object.
-     * @virtual
-     */
-
     /**
      * Gets the array of attached child modules, if any; `null` otherwise.
      * 
-     * @type {Array.<ChildModuleNode>?}
+     * @type {Array.<NamedNode>?}
      * @readonly
      */
     get children() {
@@ -746,7 +814,7 @@
     },
 
     /**
-     * Gets the child module with the given name, creating it if desired.
+     * Gets the child module with the given name, creating it if missing and desired.
      * 
      * @param {string} name - The name of the child node.
      * @param {boolean} [createIfMissing=false] - Indicates that a child node with 
@@ -755,12 +823,12 @@
      * should be created detached from their parents.
      * Only applies if `createIfMissing` is `true`.
      * 
-     * @return {ChildModuleNode?} The child node, if any; `null` otherwise.
+     * @return {NamedNode?} The child node, if any; `null` otherwise.
      */
     childByName: function(name, createIfMissing, createDetached) {
       let child = getOwn(this.__byName, name) || null;
       if (child === null && createIfMissing) {
-        child = new ChildModuleNode(name, this, createDetached);
+        child = new SimpleNode(name, this, createDetached);
       }
 
       return child;
@@ -776,7 +844,7 @@
     /** 
      * Adds the given child module to the list of children.
      * 
-     * @param {ChildModuleNode} child - The child module.
+     * @param {NamedNode} child - The child module.
      * @private
      * @internal
      */
@@ -815,7 +883,7 @@
     // Supports AMD plugins.
     // When DEBUG and !Lax: 
     // - Throws on null id.
-    // - Throws on URLs via normalizeSingle
+    // - Throws on URLs via normalizeSimple
     normalize: function(id, isFull, isLax) {
       if (isLax) {
         if (!id) {
@@ -827,25 +895,25 @@
         }
       }
       
-      // const [normalizedId = id, resourceId] = splitPluginResourceId(id);
-      let normalizedId = id;
-      let resourceId = null;
-      const pluginResourceIds = splitPluginResourceId(id);
-      if (pluginResourceIds) {
-        normalizedId = pluginResourceIds[0];
-        resourceId = pluginResourceIds[1];
+      // const [simpledId = id, resourceName] = parseResourceId(id);
+      let simpleId = id;
+      let resourceName = null;
+      const resourceIdParts = parseResourceId(id);
+      if (resourceIdParts) {
+        simpleId = resourceIdParts[0];
+        resourceName = resourceIdParts[1];
       }
 
-      normalizedId = this.normalizeSingle(normalizedId, isFull, isLax);
+      simpleId = this.normalizeSimple(simpleId, isFull, isLax);
       
-      if (pluginResourceIds) {
-        return normalizedId + "!" + this.__normalizePluginResource(normalizedId, resourceId);
+      if (resourceIdParts) {
+        return simpleId + RESOURCE_SEPARATOR + this.__normalizePluginResource(simpleId, resourceName);
       }
       
-      return normalizedId;
+      return simpleId;
     },
 
-    // Does not support Amd plugin identifiers (e.g. "css!./styles").
+    // Does not support resources.
     // Does not support URLs.
     // Resolves "./" and "../" relative to this node's identifier.
     // - Throws on going above this node's id.
@@ -863,25 +931,25 @@
     // - applies maps
     // - resolves package main
     // isLax: allows "*" and the "!" character; for use in resource ids.
-    normalizeSingle: function(singleId, isFull, isLax) {
+    normalizeSimple: function(simpleId, isFull, isLax) {
       
       if (isLax) {
-        if (!singleId) {
+        if (!simpleId) {
           return null;
         }
       } else if (DEBUG) {
-        this.validateSingle(singleId);
+        assertSimple(simpleId);
       }
       
-      let normalizedId = absolutizeId(singleId, this.parentId);
+      let normalizedId = absolutizeId(simpleId, this.parentId);
       
       if (isFull) {
         // Mapping.
         normalizedId = this.applyMap(normalizedId);
 
-        // For now, assuming map cannot return a plugin call.
+        // For now, assuming map cannot return a resource identifier.
         if (DEBUG) {
-          this.validateSingle(normalizedId);
+          assertSimple(normalizedId);
         }
         
         // Main.
@@ -892,26 +960,6 @@
       }
 
       return normalizedId;
-    },
-
-    validateSingle: function(singleId) {
-      if (!singleId) {
-        throw new Error("Invalid empty id.");
-      }
-
-      if (singleId === STAR) {
-        throw new Error("Invalid id '" + STAR + "'.");
-      }
-
-      if (singleId.indexOf("!") >= 0) {
-        throw new Error("Plugin call id not allowed: '" + singleId + "'.");
-      }
-
-      if (isAbsoluteUrl(singleId)) {
-        throw new Error("URL not allowed: '" + singleId + "'.");
-      }
-
-      return singleId;
     },
 
     // require(["idOrAbsURL", ...]
@@ -927,30 +975,29 @@
       return this.normalize(definedId, true);
     },
 
-    __normalizePluginResource: function(normalizedPluginId, resourceId) {
-      // If the plugin is loaded, use if to normalize resourceId.
+    __normalizePluginResource: function(normalizedPluginId, resourceName) {
+      // If the plugin is loaded, use it to normalize resourceName.
       const plugin = resolveUseDefault(this.get(normalizedPluginId));
       if (!plugin) {
         // Mark unnormalized and fix later.
-        return resourceId + "_unnormalized" + (unnormalizedCounter++);
+        return resourceName + RESOURCE_UNNORMALIZED + (unnormalizedCounter++);
       }
 
       if (plugin.normalize) {
-        return plugin.normalize(resourceId, this.normalizeResource.bind(this));
+        return plugin.normalize(resourceName, this.normalizeResource.bind(this));
       }
       
       // Per RequireJS, nested plugin calls would not normalize correctly...
-      if (resourceId.indexOf("!") < 0) {
-        return this.normalizeResource(resourceId);
+      if (isResourceId(resourceName)) {
+        return resourceName; 
       }
       
-      return resourceId;
+      return this.normalizeResource(resourceName);
     },
 
     // Default normalization used when loader plugin does not have a normalize method.
-    // pluginCallId = "<singleId>!<resourceId>"
-    normalizeResource: function(resourceId) {
-      return this.normalizeSingle(resourceId, true, true);
+    normalizeResource: function(resourceName) {
+      return this.normalizeSimple(resourceName, true, true);
     },
 
     /**
@@ -999,7 +1046,7 @@
     configMap: function(mapSpec) {
 
       Object.keys(mapSpec).forEach(function(aliasId) {
-        this._aliasMap[this.validateSingle(aliasId)] = this.validateSingle(mapSpec[aliasId]);
+        this._aliasMap[assertSimple(aliasId)] = assertSimple(mapSpec[aliasId]);
       }, this);
     },
 
@@ -1023,7 +1070,7 @@
      * Gets this node's AMD contextual `require` function.
      * @type {function}
      * @readonly
-     * @see AbstractModuleNode#_createRequire
+     * @see AbstractNode#_createRequire
      */
     get require() {
       return this.__require || (this.__require = this._createRequire());
@@ -1032,7 +1079,7 @@
     /**
      * Creates an AMD `require` function which has this node as the context node.
      * @name _createRequire
-     * @memberOf AbstractModuleNode#
+     * @memberOf AbstractNode#
      * @return {function} A AMD `require` function.
      * @protected
      * @abstract
@@ -1041,10 +1088,10 @@
 
   // #endregion
 
-  // #region AbstractChildModuleNode Class
-  function AbstractChildModuleNode(parent, aliasMap) {
+  // #region AbstractChildNode Class
+  function AbstractChildNode(parent, aliasMap) {
     
-    AbstractModuleNode.call(this, aliasMap);
+    AbstractNode.call(this, aliasMap);
 
     this.__parent = parent;
     this.__root = parent.root;
@@ -1053,7 +1100,7 @@
     this.__amdModule = null;
   }
 
-  classExtend(AbstractChildModuleNode, AbstractModuleNode, /** @lends AbstractChildModuleNode# */{
+  classExtend(AbstractChildNode, AbstractNode, /** @lends AbstractChildNode# */{
     /** @override */
     get isRoot() {
       return false;
@@ -1082,7 +1129,7 @@
      * Gets a value that indicates if this module node is detached from the hierarchy.
      * 
      * @name isDetached
-     * @memberOf AbstractChildModuleNode#
+     * @memberOf AbstractChildNode#
      * @type {boolean}
      * @readonly
      * @abstract
@@ -1092,7 +1139,7 @@
      * Gets the URL of this module.
      * 
      * @name url
-     * @memberof AbstractChildModuleNode#
+     * @memberof AbstractChildNode#
      * @type {string?}
      * @readonly
      * @abstract
@@ -1102,7 +1149,7 @@
      * Gets the configuration of this node, if any; `null`, otherwise.
      * 
      * @name config
-     * @memberOf AbstractChildModuleNode#
+     * @memberOf AbstractChildNode#
      * @type {object?}
      * @readonly
      * @abstract
@@ -1146,7 +1193,8 @@
       return (this.__amdModule = amdModule);
     },
 
-    __assertAttached: function() {
+    /** @protected */
+    _assertAttached: function() {
       if (this.isDetached) {
         throw new Error("Operation invalid on dettached module nodes.");
       }
@@ -1159,19 +1207,19 @@
   });
   // #endregion
 
-  // #region AnonymousChildModuleNode Class
-  function AnonymousChildModuleNode(url, parent) {
+  // #region AnonymousNode Class
+  function AnonymousNode(url, parent) {
 
     if (DEBUG && !(url || parent || !parent.isRoot)) {
       throw new Error("Invalid arguments.");
     }
 
-    AbstractChildModuleNode.call(this, parent, parent._aliasMap);
+    AbstractChildNode.call(this, parent, parent._aliasMap);
 
     this.__url = url;
   }
 
-  classExtend(AnonymousChildModuleNode, AbstractChildModuleNode, /** @lends AnonymousChildModuleNode# */{
+  classExtend(AnonymousNode, AbstractChildNode, /** @lends AnonymousNode# */{
     /** @override */
     get isDetached() {
       return true;
@@ -1189,40 +1237,31 @@
   });
   // #endregion
   
-  // #region ChildModuleNode Class
-  function ChildModuleNode(name, parent, isDetached) {
+  // #region NamedNode Class
+  function NamedNode(name, parent, isDetached) {
 
-    if (DEBUG && !(name || parent)) {
+    if (DEBUG && (!name || !parent)) {
       throw new Error("Invalid arguments.");
     }
+
     // When detached, no new configurations can be made, so reuse the parent's alias map.
     const aliasMap = isDetached ? parent._aliasMap : Object.create(parent._aliasMap);
 
-    AbstractChildModuleNode.call(this, parent, aliasMap);
+    AbstractChildNode.call(this, parent, aliasMap);
 
-    this.__id = composeIds(parent.id, name);
+    // module
+    // bundle
+    // plugin
+    // plugin!./resource
+    // plugin!./resource_unnormalized123
     this.__name = name;
+
+    // parent-id/child-name
+    this.__id = composeIds(parent.id, name);
+
     this.__isDetached = !!isDetached;
     
-    // ---
-    // Configuration properties.
-    this.__config = null;
-
-    // Package main
-    this.__main = null;
-
     this.__bundle = null;
-    
-    // The fixed path, if any.
-    this.__fixedPath = null;
-
-    // `null` means no fixed path was defined for self of any of the ascendant nodes (except root).
-    this.__cachedPath = undefined;
-
-    // `null` means no fixed path was defined (idem)...
-    this.__cachedUrlRegular = undefined;
-
-    // ---
 
     if (!isDetached) {
       this.__root.__indexNode(this);
@@ -1230,7 +1269,7 @@
     }
   }
 
-  classExtend(ChildModuleNode, AbstractChildModuleNode, /** @lends ChildModuleNode# */{
+  classExtend(NamedNode, AbstractChildNode, /** @lends NamedNode# */{
     /** @override */
     get isDetached() {
       return this.__isDetached;
@@ -1247,48 +1286,9 @@
     },
 
     /**
-     * Gets the main module of this module.
-     * 
-     * A module which has a main module is considered a package.
-     * 
-     * When set, the identifier string of the main node can be specified,
-     * considered relative to this module, 
-     * even when a bare name (without starting with `./`).
-     * If the value has the extension `.js`, if is removed.
-     * 
-     * @type {ChildModuleNode?}
-     * @readonly
-     * @see ChildModuleNode#setMain
-     */
-    get main() {
-      return this.__main;
-    },
-
-    /**
-     * Sets the main module of this module.
-     * 
-     * Should be a regular module identifier (without "!").
-     * 
-     * @param {string?} relativeId - A relative identifier to the main sub-module of this module.
-     * The identifier is considered relative to this module,
-     * even when a bare name (without starting with `./`).
-     * If the value has the extension `.js`, it is removed.
-     * 
-     * @see ChildModuleNode#main
-     */
-    setMain: function(relativeId) {
-
-      this.__assertAttached();
-
-      this.__main = relativeId
-        ? this.getRelative(this.normalizeSingle(removeJsExtension(relativeId)), true)
-        : null;
-    },
-
-    /**
      * Gets or sets this modules's bundle module.
      * 
-     * @type {ChildModuleNode?}
+     * @type {NamedNode?}
      */
     get bundle() {
       return this.__bundle;
@@ -1296,100 +1296,19 @@
 
     set bundle(value) {
 
-      this.__assertAttached();
+      this._assertAttached();
 
       const bundleNew = value || null;
       if (bundleNew !== this.__bundle) {
-        this.__invalidateRegularUrl(function applyChange() {
+        this._invalidateRegularUrl(function applyChange() {
           this.__bundle = bundleNew;
         });
       }
     },
 
-    /**
-     * Gets or sets the path of this module.
-     * 
-     * When relative, it is relative to the root module's
-     * {@link RootModuleNode#baseUrl}.
-     * When not specified, 
-     * the path is built from the parent module's [path]{@link ChildModuleNode#path} 
-     * and this module's [name]{@link AbstractModuleNode#name}.
-     * 
-     * When set, a trailing slash is removed.
-     * 
-     * @type {string?}
-     * @see ChildModuleNode#path
-     */
-    get fixedPath() {
-      return this.__fixedPath;
-    },
-
-    set fixedPath(value) {
-
-      this.__assertAttached();
-
-      const fixedPathNew = value ? removeTrailingSlash(value) : null;
-      if (fixedPathNew !== this.__fixedPath) {
-        this.__invalidateRegularUrl(function applyChange() {
-          this.__fixedPath = fixedPathNew;
-          this.__invalidatePath();
-        });
-      }
-    },
-
-    /**
-     * Gets the effective path of this module, if one can be determined; `null`, otherwise.
-     * 
-     * When {@link ChildModuleNode#fixedPath} is specified, it is returned.
-     * Otherwise, the path is built from the parent module's [path]{@link ChildModuleNode#path} 
-     * and this module's [name]{@link AbstractModuleNode#name}.
-     * If the none of the ascendant modules has a specified `fixedPath`, `null` is returned.
-     * 
-     * @type {string?}
-     * @readonly
-     */
-    get path() {
-      if (this.__cachedPath === undefined) {
-        this.__cachedPath = this.__buildPath();
-      }
-
-      return this.__cachedPath;
-    },
-
-    get config() {
-      return this.__config;
-    },
-
-    /** @override */
-    configure: function(config) {
-      if (!this.__config) {
-        this.__config = {};
-      }
-
-      mixin(this.__config, config);
-    },
-
-    configPackage: function(packageSpec) {
-
-      this.setMain(packageSpec.main || "main");
-      
-      if (packageSpec.location) {
-        this.fixedPath = packageSpec.location;
-      }
-    },
-    
-    configPath: function(pathSpec) {
-      
-      if (Array.isArray(pathSpec)) {
-        pathSpec = pathSpec[0];
-      }
-
-      this.fixedPath = pathSpec;
-    },
-
     configBundle: function(bundleSpec) {
 
-      this.__assertAttached();
+      this._assertAttached();
 
       if (bundleSpec) {  
         const bundleId = this.id;
@@ -1406,15 +1325,29 @@
      * 
      * For purposes of better supporting canonicalIdByUrl and 
      * to integrate better with SystemJS's resolve semantics,
-     * module URLs include a fragment annotation:
+     * module URLs include a fragment annotation.
      * 
-     * - module.js#!mid=module/id             - regular module
-     * - bundle.js#!mid=bundle/id             - bundle module
-     * - plugin.js#!mid=plugin/id             - plugin module
-     * - bundle.js#!mid=bundled/module/id     - bundled module, within
-     * - plugin.js#!mid=plugin/id!resource-id - plugin call module
+     * ## URL of a Regular Module
      * 
-     * The URL is determined from the module's {@link AbstractModuleNode#id}
+     * Unbundled:
+     * - simple.js#!mid=simple/id - simple module - module which has no special role;
+     * - plugin.js#!mid=plugin/id - plugin module - module which has the resource loader role;
+     * - bundle.js#!mid=bundle/id - bundle module - module which has the bundling role; typically, itself has an undefined value;
+     * 
+     * Bundled:
+     * - bundle.js#!mid=simple/id - simple module which has been bundled;
+     * - bundle.js#!mid=plugin/id - plugin module which has been bundled;
+     * 
+     * ## URL of a Resource Module
+     * 
+     * Unbundled:
+     * - plugin.js#!mid=plugin/id!resource-id - resource module, when resolved client-side
+     * - plugin.js#!mid=plugin/id!resource-id_unnormalized123 - unnormalized resource module, when resolved client-side.
+     * 
+     * Bundled:
+     * - bundle.js#!mid=plugin/id!resource-id - resource module, when processed server-side and bundled (always normalized).
+     * 
+     * The URL is determined from the module's {@link AbstractNode#id}
      * using the following procedure:
      * 
      * TODO: review procedure description
@@ -1448,7 +1381,200 @@
         return setUrlFragment(bundle.url, URL_MODULE_FRAGMENT + this.id);
       }
 
-      let url = this.regularUrl;
+      return this._unbundledUrl;
+    },
+
+    /**
+     * Gets the URL of this module for the case where it is not bundled.
+     * 
+     * @name _unbundledUrl
+     * @memberof NamedNode#
+     * @type {string?}
+     * @readonly
+     * @abstract
+     * @protected
+     */
+
+    /**
+     * Called whenever the regular URL of the node may change
+     * after the function `applyChange` is called.
+     * 
+     * @param {function} [applyChange] - The function which applies a change
+     * which may impact the URL value. Called with `this` as its JS context.
+     * 
+     * @protected
+     * @see SimpleNode#__regularUrl
+     * @see RootNode#__onNodeRegularUrlChanged
+     */
+    _invalidateRegularUrl: function(applyChange) {
+      if (applyChange) {
+        applyChange.call(this);
+      }
+    },
+
+    // Called when the root node's baseUrl is changed.
+    // @internal
+    // @protected
+    _onBaseUrlChanged: function() {
+      
+      this._invalidateRegularUrl();
+
+      this.eachChild(function(child) {
+        child._onBaseUrlChanged();
+      });
+    },
+  });
+  // #endregion
+
+  // #region SimpleNode Class
+  function SimpleNode(name/*, parent, isDetached*/) {
+
+    if (DEBUG && isResourceId(name)) {
+      throw new Error("Resource must be child of root.");
+    }
+
+    NamedNode.apply(this, arguments);
+
+    this.__config = null;
+
+    // Package main
+    this.__main = null;
+    
+    // The fixed path, if any.
+    this.__fixedPath = null;
+
+    // `null` means no fixed path was defined for self of any of the ascendant nodes (except root).
+    this.__pathCached = undefined;
+
+    // `null` means no fixed path was defined (idem)...
+    this.__regularUrlCached = undefined;
+  }
+
+  const baseNamedNodeInvalidateUrl = NamedNode.prototype._invalidateRegularUrl;
+
+  classExtend(SimpleNode, NamedNode, /** @lends SimpleNode# */{
+    /**
+     * Gets the main module of this module.
+     * 
+     * A module which has a main module is considered a package.
+     * 
+     * When set, the identifier string of the main node can be specified,
+     * considered relative to this module, 
+     * even when a bare name (without starting with `./`).
+     * If the value has the extension `.js`, if is removed.
+     * 
+     * @type {NamedNode?}
+     * @readonly
+     * @see NamedNode#setMain
+     */
+    get main() {
+      return this.__main;
+    },
+
+    /**
+     * Sets the main module of this module.
+     * 
+     * Should be a simple module identifier.
+     * 
+     * @param {string?} relativeId - A relative identifier to the main sub-module of this module.
+     * The identifier is considered relative to this module,
+     * even when a bare name (without starting with `./`).
+     * If the value has the extension `.js`, it is removed.
+     * 
+     * @see NamedNode#main
+     */
+    setMain: function(relativeId) {
+
+      this._assertAttached();
+
+      this.__main = relativeId
+        ? this.getRelative(this.normalizeSimple(removeJsExtension(relativeId)), true)
+        : null;
+    },
+
+    /**
+     * Gets or sets the path of this module.
+     * 
+     * When relative, it is relative to the root module's
+     * {@link RootNode#baseUrl}.
+     * When not specified, 
+     * the path is built from the parent module's [path]{@link NamedNode#path} 
+     * and this module's [name]{@link AbstractNode#name}.
+     * 
+     * When set, a trailing slash is removed.
+     * 
+     * @type {string?}
+     * @see NamedNode#path
+     */
+    get fixedPath() {
+      return this.__fixedPath;
+    },
+
+    set fixedPath(value) {
+
+      this._assertAttached();
+
+      const fixedPathNew = value ? removeTrailingSlash(value) : null;
+      if (fixedPathNew !== this.__fixedPath) {
+        this._invalidateRegularUrl(function applyChange() {
+          this.__fixedPath = fixedPathNew;
+          this.__invalidatePath();
+        });
+      }
+    },
+
+    /**
+     * Gets the effective path of this module, if one can be determined; `null`, otherwise.
+     * 
+     * When {@link NamedNode#fixedPath} is specified, it is returned.
+     * Otherwise, the path is built from the parent module's [path]{@link NamedNode#path} 
+     * and this module's [name]{@link AbstractNode#name}.
+     * If the none of the ascendant modules has a specified `fixedPath`, `null` is returned.
+     * 
+     * @type {string?}
+     * @readonly
+     */
+    get path() {
+      if (this.__pathCached === undefined) {
+        this.__pathCached = this.__buildPath();
+      }
+
+      return this.__pathCached;
+    },
+
+    get config() {
+      return this.__config;
+    },
+
+    configConfig: function(config) {
+      if (!this.__config) {
+        this.__config = {};
+      }
+
+      mixin(this.__config, config);
+    },
+
+    configPackage: function(packageSpec) {
+
+      this.setMain(packageSpec.main || "main");
+      
+      if (packageSpec.location) {
+        this.fixedPath = packageSpec.location;
+      }
+    },
+    
+    configPath: function(pathSpec) {
+      
+      if (Array.isArray(pathSpec)) {
+        pathSpec = pathSpec[0];
+      }
+
+      this.fixedPath = pathSpec;
+    },
+
+    /** @override */
+    get _unbundledUrl() {
+      let url = this.__regularUrl;
       if (url !== null) {
         
         // Add .js extension.
@@ -1476,21 +1602,32 @@
       return url;
     },
 
-    get regularUrl() {
-      if (this.__cachedUrlRegular === undefined) {
-        this.__cachedUrlRegular = this.__buildRegularUrl();
+    /** 
+     * The regular part of the URL.
+     * 
+     * @type {string?}
+     * @private
+     * @see SimpleNode#_invalidateRegularUrl
+     * @see SimpleNode#__buildRegularUrl
+     * @see SimpleNode#__isIndexedByRegularUrl
+     * @see RootNode#__onNodeRegularUrlChanged
+     */
+    get __regularUrl() {
+      if (this.__regularUrlCached === undefined) {
+        this.__regularUrlCached = this.__buildRegularUrl();
       }
 
-      return this.__cachedUrlRegular;
+      return this.__regularUrlCached;
     },
 
     __invalidatePath: function() {
       
-      this.__cachedPath = undefined;
+      this.__pathCached = undefined;
 
       this.eachChild(function(child) {
         // Stop invalidation propagation if child node does not inherit the parent's path.
-        if (child.fixedPath === null) {
+        if ((child instanceof SimpleNode) && child.fixedPath === null) {
+          // child is SimpleNode.
           child.__invalidatePath();
         }
       });
@@ -1516,17 +1653,8 @@
       return parentPath && (parentPath + "/" + this.name);
     },
 
-    // Called when the root node's baseUrl is changed.
-    __onBaseUrlChanged: function() {
-      
-      this.__invalidateRegularUrl();
-      
-      this.eachChild(function(child) {
-        child.__onBaseUrlChanged();
-      });
-    },
-
-    __invalidateRegularUrl: function(applyChange) {
+    /** @override */
+    _invalidateRegularUrl: function(applyChange) {
       // If regular URL was or will be indexed (before and after applyChange).
       let wasOrWillBeIndexed = this.__isIndexedByRegularUrl;
 
@@ -1535,22 +1663,20 @@
       let regularUrlNew;
 
       if (wasOrWillBeIndexed) {
-        regularUrlOld = this.__cachedUrlRegular || null;
+        regularUrlOld = this.__regularUrlCached || null;
       }
 
-      if (applyChange) {
-        applyChange.call(this);
-
-        // Has it become "index by regular URL"?
-        if (!wasOrWillBeIndexed) {
-          wasOrWillBeIndexed = this.__isIndexedByRegularUrl;
-        }
+      baseNamedNodeInvalidateUrl.call(this, applyChange);
+      
+      // Has it become "index by regular URL"?
+      if (!wasOrWillBeIndexed) {
+        wasOrWillBeIndexed = this.__isIndexedByRegularUrl;
       }
 
-      this.__cachedUrlRegular = undefined;
+      this.__regularUrlCached = undefined;
 
       if (wasOrWillBeIndexed) {
-        regularUrlNew = this.regularUrl;
+        regularUrlNew = this.__regularUrl;
 
         // If either old or new value are non-null, 
         // then this node needs to have its regularUrl re-indexed!
@@ -1567,7 +1693,8 @@
       return this.fixedPath !== null;
     },
 
-    // ~ on path, bundle and baseUrl
+    // Determines the value of __regularUrl.
+    // Depends on path, bundle and baseUrl
     __buildRegularUrl: function() {
       if (this.bundle !== null) {
         return null;
@@ -1592,13 +1719,90 @@
   });
   // #endregion
 
-  // #region RootModuleNode Class
+  // #region ResourceNode Class
+  /**
+   * - normalize id issues resulting in schizophrenia upon unification?
+   * - all _unnormalized_ should be created detached (although the unnormalized counter already ensures no reuse)
+   *   so that only the final normalized id is registered and loaded...
+   * - the problem is that for SystemJS, it will regard all unnormalized as relevant modules
+   *   which will end up being registered in its url registry.
+   * - when the _unnormalized_ resource module is finally loaded, it should be deleted from the registry??
+   * - `require`   does not make much sense...
+   * - `amdModule` does not make sense because there's never an actual AMD to read it.
+   * - alias map
+   *   - should work like anonymous modules.
+   *   - should be child of root / have root as parent.
+   *   - but then name is the whole composed id?
+   */
+  function ResourceNode(name, parent, isDetached) {
 
-  function RootModuleNode(systemJS) {
+    const isUnnormalized = RE_RESOURCE_ID_UNNORMALIZED.test(name);
+
+    // All unnormalized nodes are necessarily detached.
+    const isDetachedEf = isUnnormalized || !!isDetached
+    
+    NamedNode.call(this, name, parent, isDetachedEf);
+
+    const resourceIdParts = parseResourceId(this.id);
+
+    if (DEBUG && !resourceIdParts) {
+      throw new Error("Invalid argument 'name'.");
+    }
+
+    this.__plugin = this.root.getOrCreate(resourceIdParts[0], isDetachedEf);
+    this.__resourceName = resourceIdParts[1];
+
+    this.__isNormalized = !isUnnormalized;
+  }
+
+  classExtend(ResourceNode, NamedNode, /** @lends ResourceNode# */{
+    /** @override */
+    get isResource() {
+      return true;
+    },
+
+    /** @override */
+    get isNormalized() {
+      return this.__isNormalized;
+    },
+
+    /**
+     * Gets the associated loader plugin module.
+     * 
+     * Must not itself be a resource module.
+     * 
+     * @type {NamedNode}
+     * @readonly
+     */
+    get plugin() {
+      return this.__plugin;
+    },
+
+    /** 
+     * Gets the associated resource identifier.
+     * 
+     * @type {string}
+     * @readonly
+     */
+    get resourceName() {
+      return this.__resourceName;
+    },
+
+    /** @override */
+    get _unbundledUrl() {
+      // plugin.js#!mid=plugin/id!resource/name
+      return setUrlFragment(this.plugin.url, URL_MODULE_FRAGMENT + this.id); 
+    }
+  });
+  // #endregion
+
+  // #region RootNode Class
+
+  function RootNode(systemJS) {
 
     const aliasMap = Object.create(null);
 
-    AbstractModuleNode.call(this, aliasMap);
+    AbstractNode.call(this, aliasMap);
     
     /**
      * The associated SystemJS instance.
@@ -1613,7 +1817,7 @@
     /**
      * A map of all descendant modules by id.
      * 
-     * @type {Object.<string, ChildModuleNode>}
+     * @type {Object.<string, NamedNode>}
      * @readonly
      * @private
      */ 
@@ -1622,11 +1826,11 @@
     /**
      * A map of all descendant modules by _regular_ URL.
      * 
-     * @type {Object.<string, ChildModuleNode>}
+     * @type {Object.<string, NamedNode>}
      * @readonly
      * @private
      * 
-     * @see ChildModuleNode#url
+     * @see NamedNode#url
      */ 
     this.__byUrl = Object.create(null);
 
@@ -1658,9 +1862,9 @@
     this.define = createDefine(this);
   }
 
-  const baseGetRelative = AbstractModuleNode.prototype.getRelative;
+  const baseGetRelative = AbstractNode.prototype.getRelative;
 
-  classExtend(RootModuleNode, AbstractModuleNode, /** @lends RootModuleNode# */{
+  classExtend(RootNode, AbstractNode, /** @lends RootNode# */{
     /** @override */
     get isRoot() {
       return true;
@@ -1698,7 +1902,7 @@
 
         if (isBareName(newValue)) {
           // If left as is, when calling base.resolve with the URL built
-          // in `ChildModuleNode#regularUrl`, 
+          // in `SimpleNode#__regularUrl`, 
           // would give incorrect results or throw.
           newValue = "./" + newValue;
         }
@@ -1710,7 +1914,7 @@
         this.__baseUrl = newValue;
 
         this.eachChild(function(child) {
-          child.__onBaseUrlChanged();
+          child._onBaseUrlChanged();
         });
       }
     },
@@ -1732,11 +1936,16 @@
     },
 
     /** @override */
-    getRelative: function(normalizedId, createIfMissing/*, createDetached*/) {
+    getRelative: function(normalizedId, createIfMissing, createDetached) {
       
       let node = getOwn(this.__byId, normalizedId) || null;
       if (node === null && createIfMissing) {
-        node = baseGetRelative.apply(this, arguments);
+        // Resources are children of root.
+        if (isResourceId(normalizedId)) {
+          node = new ResourceNode(normalizedId, this, createDetached);
+        } else {
+          node = baseGetRelative.apply(this, arguments);
+        }
       }
 
       return node;
@@ -1746,15 +1955,19 @@
       return this.getRelative(normalizedId);
     },
 
-    getOrCreate: function(normalizedId) {
-      return this.getRelative(normalizedId, true);
+    getOrCreate: function(normalizedId, isDetached) {
+      return this.getRelative(normalizedId, true, isDetached);
     },
 
     getOrCreateDetached: function(normalizedId) {
       return this.getRelative(normalizedId, true, true);
     },
 
-    /** @override */
+    /**
+     * Configures the AMD module context.
+     * 
+     * @param {object} config - The configuration object.
+     */
     configure: function(config) {
 
       const baseUrl = config.baseUrl;
@@ -1770,7 +1983,7 @@
       const root = this;
 
       function getOrCreateSingle(id) {
-        return root.getOrCreate(root.validateSingle(id));
+        return root.getOrCreate(assertSimple(id));
       }
 
       if (config.packages) {
@@ -1793,7 +2006,7 @@
       
       eachOwn(config.map, function(mapSpec, id) {
         if (mapSpec) {
-          const node = id === STAR ? root : getOrCreateSingle(id);
+          const node = id === MAP_SCOPE_ANY_MODULE ? root : getOrCreateSingle(id);
           node.configMap(mapSpec);
         }
       });
@@ -1803,7 +2016,7 @@
       });
 
       eachOwn(config.config, function(config, id) {
-        getOrCreateSingle(id).configure(config);
+        getOrCreateSingle(id).configConfig(config);
       });
     },
 
@@ -1811,8 +2024,8 @@
      * Gets the canonical identifier of the module which has the given URL, if any;
      * `null`, if one does not exist.
      *
-     * Note that the given URL cannot correspond to the identifier of a _loader plugin call_, 
-     * as these types of modules are virtual and don't have a URL.
+     * Note that the given URL cannot correspond to the identifier of a resource module, 
+     * as these are virtual and don't have an own URL.
      * 
      * ## Algorithm
      * 
@@ -1828,7 +2041,7 @@
      * Note that, when the URL contains a query (`?`), it may be because:
      * 
      * 1. when `urlArgs` is defined, the function added it (can add ? or &);
-     * 2. it was already part of the module's `regularUrl`.
+     * 2. it was already part of the module's `__regularUrl`.
      * 
      * Whatever the case, the implemented algorithm removes each part of the URL, 
      * from the end, matching it with the URL index, 
@@ -1980,14 +2193,14 @@
      * Updates the URL index to account for the change of 
      * _regular URL_ of a descendant node.
      * 
-     * Only called for nodes having (or stopping to have) a {@link ChildModuleNode#fixedPath}.
+     * Only called for nodes having (or stopping to have) a {@link NamedNode#fixedPath}.
      * 
-     * @param {ChildModuleNode} childNode - The descendant node.
+     * @param {NamedNode} childNode - The descendant node.
      * @param {string?} regularUrlNew - The new regular URL value.
      * @param {string?} regularUrlOld - The old regular URL value.
      * @internal
      * @private
-     * @see ChildModuleNode#url
+     * @see NamedNode#url
      */
     __onNodeRegularUrlChanged: function(childNode, regularUrlNew, regularUrlOld) {
       // Don't delete if old regular url is taken by other node.
@@ -2006,47 +2219,6 @@
 
   // #region Amd and SystemJS stuff
 
-  function createDefine(rootNode) {
-
-    define.amd = {
-      // https://github.com/amdjs/amdjs-api/wiki/jQuery-and-AMD
-      jQuery: true
-    };
-
-    return define;
-
-    /**
-     * - define("id", {})
-     * - define("id", function(require, exports, module) {})
-     * - define("id", [], function() {})
-     * - define({})
-     * - define(function(require, exports, module) {})
-     * - define([], function() {})
-     */
-    function define(id, deps, execute) {
-
-      if (typeof id !== "string") {
-        // Anonymous define. Shift arguments right.
-        execute = deps;
-        deps = id;
-        id = null; 
-      }
-
-      if (typeof deps === "function") {
-        execute = deps;
-        deps = REQUIRE_EXPORTS_MODULE;
-
-      } else if (!Array.isArray(deps)) {
-        // deps is an object or some other value.
-        execute = constantFun(deps);
-        deps = [];
-
-      } // else, `deps` is an array and assuming but not checking that `execute` is a fun...
-
-      rootNode._systemJS.__queueAmdDef(id, deps, execute);
-    }
-  }
-
   function createRequire(node) {
 
     const rootNode = node.root;
@@ -2058,19 +2230,9 @@
       toUrl: function(moduleNamePlusExt) {
       },
 
-      // As soon as the exports object is created and
-      // the module is loading or has been loaded.
       defined: function(id) {
       },
 
-      // There is an attached node for it?
-      // 1. Normalize id.
-      //    1.1. If there is a plugin in it:
-      //      1.1.1. If the plugin is loaded and has a normalize method then use it to normalize resource name.
-      //      1.1.2. If the resource name has no "!" then normalize resource name normally.
-      //      1.1.3. Else, do not normalize name.
-      //    1.2. Else, normalize id normally.
-      // 2. Apply mapping to id.
       specified: function(id) {
       }
     });
@@ -2120,9 +2282,9 @@
           return value;
         }
 
-        const resolvedDepId = systemJS.resolve(normalizedDepRef);
-        if (systemJS.has(resolvedDepId)) {
-          return resolveUseDefault(systemJS.get(resolvedDepId));
+        const depUrl = systemJS.resolve(normalizedDepRef);
+        if (systemJS.has(depUrl)) {
+          return resolveUseDefault(systemJS.get(depUrl));
         }
         
         throw new Error("Dependency '" + normalizedDepRef + "' isn't loaded yet.");
@@ -2184,10 +2346,51 @@
     }
   }
 
+  function createDefine(rootNode) {
+
+    define.amd = {
+      // https://github.com/amdjs/amdjs-api/wiki/jQuery-and-AMD
+      jQuery: true
+    };
+
+    return define;
+
+    /**
+     * - define("id", {})
+     * - define("id", function(require, exports, module) {})
+     * - define("id", [], function() {})
+     * - define({})
+     * - define(function(require, exports, module) {})
+     * - define([], function() {})
+     */
+    function define(id, deps, execute) {
+
+      if (typeof id !== "string") {
+        // Anonymous define. Shift arguments right.
+        execute = deps;
+        deps = id;
+        id = null; 
+      }
+
+      if (typeof deps === "function") {
+        execute = deps;
+        deps = REQUIRE_EXPORTS_MODULE;
+
+      } else if (!Array.isArray(deps)) {
+        // deps is an object or some other value.
+        execute = constantFun(deps);
+        deps = [];
+
+      } // else, `deps` is an array and assuming but not checking that `execute` is a fun...
+
+      rootNode._systemJS.__queueAmdDef(id, deps, execute);
+    }
+  }
+
   /**
    * Creates a SystemJS register for an AMD (module definition).
    * 
-   * @param {AbstractChildModuleNode} node - The AMD child node of the module being defined.
+   * @param {AbstractChildNode} node - The AMD child node of the module being defined.
    * @param {Array.<string>} depRefs - An array of AMD references of the dependencies of the AMD (definition).
    * @param {function} execute - The AMD factory function.
    * @return {Array} A SystemJS register.
@@ -2247,6 +2450,26 @@
     return function depSetter(ns) {
       depValues[depIndex] = resolveUseDefault(ns);
     };
+  }
+
+  function assertSimple(simpleId) {
+    if (!simpleId) {
+      throw new Error("Invalid empty id.");
+    }
+
+    if (simpleId === MAP_SCOPE_ANY_MODULE) {
+      throw new Error("Invalid id '" + MAP_SCOPE_ANY_MODULE + "'.");
+    }
+
+    if (isResourceId(simpleId)) {
+      throw new Error("Plugin call id not allowed: '" + simpleId + "'.");
+    }
+
+    if (isAbsoluteUrl(simpleId)) {
+      throw new Error("URL not allowed: '" + simpleId + "'.");
+    }
+
+    return simpleId;
   }
   // #endregion
 
@@ -2418,11 +2641,15 @@
     return !!text && !isAbsoluteUrl(text) && text[0] !== ".";
   }
 
-  function splitPluginResourceId(id) {
-    const index = id.indexOf("!");
+  function parseResourceId(id) {
+    const index = id.indexOf(RESOURCE_SEPARATOR);
     return index !== -1
       ? [id.substring(0, index), id.substring(index + 1)]
       : null;
+  }
+
+  function isResourceId(id) {
+    return !!id && id.indexOf(RESOURCE_SEPARATOR) >= 0;
   }
   // #endregion
 
