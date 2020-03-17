@@ -21,10 +21,12 @@
 	self.assert = {
 		ok: function (val) {
 			this.equal(!!val, true);
+			return val;
 		},
 		equal: function equal(a, b) {
 			if (a !== b)
 				throw new Error('Expected "' + a + '" to be "' + b + '"');
+			return a;
 		},
 		fail: function (msg) {
 			throw new Error(msg);
@@ -111,21 +113,40 @@
 
 	const baseUrl = "http://127.0.0.1:8080/";
 
+	let amdAnonymousLoad1;
 	doTests([
 		function() {
-			return System.import("amd-tests/amd-anonymous");
+			return System.import("amd-tests/amd-anonymous").then(function(value) {
+				return (amdAnonymousLoad1 = value);
+			});
 		},
 		function() {
 			return System.import("amd-tests/amd-module-dep");
 		},
 		function() {
-			return System.import("amd-tests-global-alias/amd-anonymous");
+			return System.import("amd-tests-global-alias/amd-anonymous").then(function(amdAnonymousLoad2) {
+				return assert.equal(amdAnonymousLoad2, amdAnonymousLoad1);
+			});
 		},
 		function() {
 			return System.import("amd-tests/amd-scoped-dep");
 		},
 		function() {
-			return System.import("amd-tests/amd-bundleA");
+			return System.import("amd-tests/amd-bundleA").then(function(value) {
+				assert.equal(value, undefined);
+			});
+		},
+		function() {
+			return System.import("amd-tests/amd-pluginA!foo-resource");
+		},
+		function() {
+			return System.import("amd-tests/amd-pluginA!foo-resource");
+		},
+		function() {
+			return System.import("amd-tests/amd-pluginA!bar-resource");
+		},
+		function() {
+			return System.import("amd-tests/amd-plugin-dep");
 		},
 		function() {
 			assertNormalize("amd-tests/amd-anonymous", "amd-tests/amd-anonymous");
@@ -134,13 +155,15 @@
 			assertNormalize("amd-tests-global-alias/amd-anonymous", "amd-tests/amd-anonymous");
 			assertNormalize("amd-tests/amd-bundleA", "amd-tests/amd-bundleA");
 			assertNormalize("amd-tests/amd-pluginA", "amd-tests/amd-pluginA");
-			assertNormalize("amd-tests/amd-pluginA!foo", "amd-tests/amd-pluginA!foo_unnormalized");
+			assertNormalize("amd-tests/amd-pluginA!foo", "amd-tests/amd-pluginA!foo");
+			assertNormalize("amd-tests/amd-plugin-unloaded!foo", "amd-tests/amd-plugin-unloaded!foo_unnormalized");
 		},
 		function() {
 			assertResolve("amd-tests/amd-anonymous", baseUrl + "src/temp/tests/amd-anonymous.js#!mid=amd-tests/amd-anonymous");
 			assertResolve("amd-tests/amd-module-dep", baseUrl + "src/temp/tests/amd-module-dep.js#!mid=amd-tests/amd-module-dep");
 			assertResolve("amd-tests-global-alias/amd-anonymous", baseUrl + "src/temp/tests/amd-anonymous.js#!mid=amd-tests/amd-anonymous");
-			assertResolve("amd-tests/amd-pluginA!foo", baseUrl + "src/temp/tests/amd-pluginA.js#!mid=amd-tests/amd-pluginA!foo_unnormalized");
+			assertResolve("amd-tests/amd-pluginA!foo", baseUrl + "src/temp/tests/amd-pluginA.js#!mid=amd-tests/amd-pluginA!foo");
+			assertResolve("amd-tests/amd-plugin-unloaded!foo", baseUrl + "src/temp/tests/amd-plugin-unloaded.js#!mid=amd-tests/amd-plugin-unloaded!foo_unnormalized");
 		},
 		function() {
 			assertCanonicalId(baseUrl + "src/temp/tests/amd-anonymous.js", "amd-tests/amd-anonymous");
@@ -151,6 +174,7 @@
 		},
 		function() {
 			return new Promise(function(resolve, reject) {
+				// Async require
 				System.amd.require([
 					"amd-tests/amd-anonymous",
 					"amd-tests/amd-module-dep"
@@ -170,6 +194,7 @@
 					"amd-tests/amd-module-dep"
 				], function(anonymous, dep) {
 					
+					// Sync require
 					assert.equal(System.amd.require("amd-tests/amd-anonymous"), anonymous);
 					assert.equal(System.amd.require("amd-tests/amd-module-dep"), dep);
 					
