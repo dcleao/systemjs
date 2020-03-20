@@ -1,1 +1,5 @@
-var myGlobal = {prop: "amd-shimmed"};
+var myGlobal = {
+  prop: "amd-shimmed", 
+  depA: null,
+  depB: null
+};
