@@ -97,13 +97,14 @@
   // - Modules with paths/URLs with fragments, as they're used for other purposes.
   // - A dependency ending with ".js" being considered an URL and not a module identifier.
   //   - The top-level require's `jsExtRegExp` property; used to filter out dependencies that are already URLs.
-  // - Being able to `map` a regular identifier to a resource identifier.
+  // - Being able to `map` a simple identifier to a resource identifier.
   // - Being able to specify `paths` fallbacks; when an array is provided, only the first value is considered.
+  // - Being able to shim a resource module.
   //
   // RequireJS
   // ---------
   // https://requirejs.org
-  //
+  // 
   // - CommonJS-style factory: detection of `require(.)` dependencies in factory function code, using `toString`.
   // - require.defined/specified ? Are these worth it?
   // - require.onError, require.createNode, require.load
@@ -256,6 +257,7 @@
       }
     },
 
+    // NOTE: Ideally, this operation would be part of SystemJS and would be overridden by both the Import Maps and this extra.
     /**
      * Gets the canonical identifier of a given URL, if one exists; `null`, otherwise.
      * 
@@ -326,57 +328,90 @@
      * The canonical identifier would be `g/duu`.
      */
     canonicalIdByUrl: function(url) {
-      // ## SystemJS Common.
-      // 1. What?
-      if (!url) {
-        // Returning `null` would not help when overriding,
-        // as it means "no URL found" from lower layer.
-        throw new Error("Argument 'url' is required.");
-      }
+      // If the fragment #!mid=<id> is there, just trust it and return the module identifier.
+      // - Prefer bundledId, if present, otherwise, return the scriptId.
+      // Else, go through the actual inverse algorithms.
+      const urlAndIdAndBundledId = parseUrlWithModuleFragment(url);
+      return urlAndIdAndBundledId
+        ? (urlAndIdAndBundledId[2] || urlAndIdAndBundledId[1])
+        : this._canonicalIdByUrl(url);
+    },
 
-      // 2. If the fragment #!mid=<id> is there, just trust it and return the module identifier.
-      const moduleFragmentIndex = url.indexOf(URL_MODULE_FRAGMENT);
-      if (moduleFragmentIndex >= 0) {
-        return url.substr(moduleFragmentIndex + URL_MODULE_FRAGMENT.length);
-      }
+    _canonicalIdByUrl: function(url) {
+      
+      // 1. SystemJS - Import Maps
 
-      // ## SystemJS - Import Maps
-
-      // ## SystemJS - AMD
+      // 2. SystemJS - AMD
       return this.amd.canonicalIdByUrl(url);
     },
 
+    getUrlAndCanonicalId: function(url) {
+      return parseUrlWithModuleFragment(url) || [url, this._canonicalIdByUrl(url), null];
+    },
+
     /** @override */
-    instantiate: function(specifier, referralUrl) {
-      // named-registry.js extra loaded after.
-      // assert specifier not in name registry
-
-      /**
-       * The Named AMD node being imported, if any.
-       * 
-       * When `importNode` remains `null` here,
-       * in `__instantiateRegularEnd`, if AMD defines are processed,
-       * an `AnonymousNode` is created to represent `specifier` (an URL).
-       * 
-       * @type {null|SimpleNode|ResourceNode}
-       */
-      let importNode = null;
-
-      if (isAbsoluteUrl(specifier)) {
-        const resolvedId = this.canonicalIdByUrl(specifier);
-        if (resolvedId !== null) {
-          
-          importNode = this.amd.getOrCreate(resolvedId);
-          if (importNode instanceof ResourceNode) {
-            // Load the plugin first.
-            return this.import(importNode.plugin.id)
-              .then(this.__instantiateResource.bind(this, importNode, referralUrl));
-          }
-        }
+    instantiate: function(loadUrl, referralUrl) {
+      // named-registry.js extra is loaded after require.js.
+      // If `loadUrl` were a name in the name registry, the code would not reach here.
+      // If it were not a name in the name registry, resolve would have thrown.
+      // All specifiers resolved via AMD or ImportMap are URLs.
+      // => `loadUrl` must be an URL.
+      if (DEBUG && !isAbsoluteUrl(loadUrl)) {
+        throw new Error("Invalid program.");
       }
+
+      // Is there a canonical identifier for it?
+      // This captures any #!mid=<import/canonical/id> in the URL fragment.
+      // Recovers the _originally imported module_ in the case of loadUrl being a bundle's URL.
       
-      return Promise.resolve(base.instantiate.call(this, specifier, referralUrl))
-        .then(this.__instantiateRegularEnd.bind(this, specifier, importNode));
+      // const [scriptUrl, scriptName, bundledName] = this.getUrlAndCanonicalId(loadUrl);
+      const urlParts = this.getUrlAndCanonicalId(loadUrl);
+      const scriptUrl = urlParts[0];
+      const scriptId = urlParts[1];
+      const bundledId = urlParts[2];
+      const isBundled = !!bundledId;
+      
+      const importId = isBundled ? bundledId : scriptId;
+      
+      let namedImportNode = importId && this.amd.getOrCreate(importId);
+
+      let scriptNode = null;
+      let scriptShim = null;
+      let getScriptNode = null;
+
+      if (namedImportNode !== null) { 
+        if (namedImportNode instanceof ResourceNode) {
+          // Load the plugin first.
+          return this.import(namedImportNode.plugin.id)
+            .then(this.__instantiateResource.bind(this, namedImportNode, referralUrl));
+        }
+        // -> It's a SimpleNode
+
+        // Check if the _script module_ has a configured shim.
+        // If so, load its dependencies, beforehand.
+        // The shims of bundled modules are ignored; these must be handled by the bundler.
+        scriptNode = isBundled ? this.amd.getOrCreate(scriptId) : namedImportNode;
+        scriptShim = scriptNode.shim;
+        getScriptNode = constantFun(scriptNode);
+
+        if (scriptShim !== null && scriptShim.deps !== null) {
+          return scriptNode.requireManyAsync(scriptShim.deps)
+            .then(this.__instantiateRegular.bind(this, namedImportNode, referralUrl, loadUrl, getScriptNode, scriptShim));
+        }
+        // -> Not shimmed.
+        // -> scriptNode !== null
+      }
+
+      // Lazy getScriptNode, if really needed.
+      // If scriptNode is a named node, then it has already been determined, above.
+      // It only remains being an Anonymous node.
+      if (getScriptNode === null) {
+        getScriptNode = function() {
+          return scriptNode || (scriptNode = new AnonymousNode(scriptUrl, this.amd));
+        }.bind(this);
+      }
+
+      return this.__instantiateRegular(namedImportNode, referralUrl, loadUrl, getScriptNode, scriptShim);
     },
 
     /** 
@@ -402,30 +437,63 @@
       return base.getRegister.call(this);
     },
 
+    __instantiateRegular: function(namedImportNode, referralUrl, loadUrl, getScriptNode, scriptShim) {
+      return Promise.resolve(base.instantiate.call(this, loadUrl, referralUrl))
+        .then(this.__instantiateRegularEnd.bind(this, namedImportNode, getScriptNode, scriptShim));
+    },
+
     /** 
-     * Handles the end phase of instantiation of either an Anonymous or Simple AMD module.
+     * Handles the end phase of instantiation.
      * 
-     * Processes any queued AMD `define` calls by creating and registering the corresponding SystemJS registers.
+     * If AMD is involved, the module will be an Anonymous or Simple module.
      * 
-     * If an AMD module had been requested, as represented by the given `importNode` argument, 
-     * then this module's SystemJS register is read from the named registry and returned,
-     * and if it is missing, an empty SystemJS register is returned.
+     * First, 
+     * processes any queued AMD `define` calls by creating and registering the corresponding SystemJS registers.
      * 
-     * Otherwise, the SystemJS register in argument `baseRegister` is returned.
+     * Then, 
+     * if the module being instantiated was imported by _bare name_, 
+     * or if a canonical name existed for the imported URL,
+     * as is represented by the given `namedImportNode` argument, 
+     * then this module's SystemJS register is read from the named registry and returned.
+     * If it is missing, an empty SystemJS register is returned for it.
+     * 
+     * Otherwise, if there is no canonical name for the import (i.e. `namedImportNode` is `null`),
+     * the SystemJS register given in argument `baseRegister` is returned.
      * 
      * It is expected that a script file contains either AMD _or_ SystemJS definitions.
      * 
-     * @param {string} loadUrl - The URL of the file being loaded.
-     * @param {SimpleNode?} namedImportNode - The AMD child node being imported by name; `null`, otherwise.
+     * @param {function() : RegularNode} getScriptNode - A function which obtains the script node being loaded.
+     * @param {SimpleNode?} namedImportNode - The simple node representing a named import; `null`, if there isn't one.
      * @param {Array} baseRegister - The SystemJS register returned by 
      * the base implementation, {@link SystemJS#instantiate}. Assuming it is defined.
-     * 
+     * @param {Array?} [shimDeps] - The dependencies of a shimmed module.
      * @return {Array} A SystemJS register.
      * @private
      */
-    __instantiateRegularEnd: function(loadUrl, namedImportNode, baseRegister) {
+    __instantiateRegularEnd: function(namedImportNode, getScriptNode, scriptShim, baseRegister) {
       
-      this.__processAmdDefs(loadUrl);
+      let foundScriptModule = false;
+
+      if (this.__amdDefQueue.length > 0) {
+        
+        const scriptNode = getScriptNode();
+        
+        let amdDef;
+        while((amdDef = this.__amdDefQueue.shift()) !== undefined) {
+          if (this.__processAmdDef(scriptNode, amdDef.id, amdDef.deps, amdDef.execute)) {
+            foundScriptModule = true;
+          }
+        }
+      }
+
+      // ---
+
+      // Is it a shimmed module? If so, automatically provide a definition for it.
+      if (!foundScriptModule && scriptShim !== null) {
+        this.__processAmdDef(getScriptNode(), null, scriptShim.deps || [], scriptShim.factory);
+      }
+      
+      // ---
 
       if (namedImportNode !== null) {
         return this.__nameRegistry[namedImportNode.url] || EMTPY_AMD_REGISTER;
@@ -499,71 +567,34 @@
     },
 
     /**
-     * Processes all queued AMD (module definitions).
-     * 
-     * @param {string} loadUrl - The URL of the file being loaded.
-     * @private
-     */
-    __processAmdDefs: function(loadUrl) {
-      /**
-       * The node of the script being loaded.
-       * 
-       * Make sure to remove the fragment to obtain the underlying _plugin_ or _bundle_ node.
-       * 
-       * @type {AnonymousNodeSimpleNode}
-       */
-      let loadNode = this.__amdNodeOfUrl(removeUrlFragment(loadUrl));
-      
-      let foundLoadingModule = false;
-
-      if (this.__amdDefQueue.length > 0) {
-        
-        let amdDef;
-        while((amdDef = this.__amdDefQueue.shift()) !== undefined) {
-          if (this.__processAmdDef(loadNode, amdDef.id, amdDef.deps, amdDef.execute)) {
-            foundLoadingModule = true;
-          }
-        }
-      }
-
-      // Is it a shimmed module? If so, automatically provide a definition for it.
-      if (!foundLoadingModule && (loadNode instanceof SimpleNode)) {
-        const shim = loadNode.shim;
-        if (shim !== null) {
-          this.__processAmdDef(loadNode, null, shim.deps, shim.factory);
-        }
-      }
-    },
-
-    /**
      * Processes an AMD (module definition) and registers a SystemJS register under its URL.
      * 
-     * @param {AbstractChildNode} loadNode - The AMD child node being loaded.
+     * @param {AbstractChildNode} scriptNode - The node of the script being loaded.
      * @param {string?} id - The AMD identifier of the AMD (definition).
      * @param {Array.<string>} deps - An array of AMD references of the dependencies of the AMD (definition).
      * @param {function} execute - The AMD factory function.
      * @return {boolean} `true` if an AMD module with the given identifier or that of `loadNode` was found.
      * @private
      */
-    __processAmdDef: function(loadNode, id, deps, execute) {
+    __processAmdDef: function(scriptNode, id, deps, execute) {
       
       const isNamedDefinition = id !== null;
 
       // The AMD node being _defined_.
-      // When the definition is anonymous, assume that it is `loadNode` which is being defined.
-      // - Note that `loadNode` may or may not have a canonical identifier...
+      // When the definition is anonymous, assume that it is `scriptNode` which is being defined.
+      // - Note that `scriptNode` may or may not have a canonical identifier...
       // When the definition is named, get or create a node for it.
       const definedNode = isNamedDefinition
         ? this.amd.getOrCreate(this.amd.normalizeDefined(id))
-        : loadNode;
+        : scriptNode;
 
       const url = definedNode.url;
 
       if (DEBUG) {
         // Both of the following cases are the result of misconfiguration and are thus not supported:
-        // - If the node has no defined bundle, `loadNode` could be it.
-        // - If the node has no defined fixedPath, `loadNode.url` could be it.
-        if (isNamedDefinition && definedNode !== loadNode && definedNode.bundle !== loadNode) {
+        // - If the node has no defined bundle, `scriptNode` could be it.
+        // - If the node has no defined fixedPath, `scriptNode.url` could be it.
+        if (isNamedDefinition && definedNode !== scriptNode && definedNode.bundle !== scriptNode) {
           throw new Error("AMD named define for a module without a configured path or bundle.");
         }
 
@@ -585,7 +616,7 @@
       this.__nameRegistry[url] = this._processRegister(createAmdRegister(definedNode, deps, execute));
 
       // Was it anonymous or the named, loaded script?
-      return !isNamedDefinition || (definedNode.id === loadNode.id);
+      return !isNamedDefinition || (definedNode.id === scriptNode.id);
     },
 
     get __nameRegistry() {
@@ -1066,8 +1097,8 @@
      * - bundle.js#!mid=bundle/id - bundle module - module which has the bundling role; typically, itself has an undefined value;
      * 
      * Bundled:
-     * - bundle.js#!mid=simple/id - simple module which has been bundled;
-     * - bundle.js#!mid=plugin/id - plugin module which has been bundled;
+     * - bundle.js#!mid=bundle/id#!mid=simple/id - simple module which has been bundled;
+     * - bundle.js#!mid=bundle/id#!mid=plugin/id - plugin module which has been bundled;
      * 
      * ## URL of a Resource Module
      * 
@@ -1076,7 +1107,7 @@
      * - plugin.js#!mid=plugin/id!resource-id_unnormalized123 - unnormalized resource module, when resolved client-side.
      * 
      * Bundled:
-     * - bundle.js#!mid=plugin/id!resource-id - resource module, when processed server-side and bundled (always normalized).
+     * - bundle.js#!mid=bundle/id#!mid=plugin/id!resource-id - resource module, when processed server-side and bundled (always normalized).
      * 
      * The URL is determined from the module's {@link AbstractNode#id}
      * using the following procedure:
@@ -1130,6 +1161,65 @@
       }, this);
     },
 
+    /**
+     * Gets this node's AMD contextual `require` function.
+     * @type {function}
+     * @readonly
+     * @see AbstractNode#_createRequire
+     */
+    get require() {
+      return this.__require || (this.__require = this._createRequire());
+    },
+
+    /**
+     * Creates an AMD `require` function which has this node as the context node.
+     * @name _createRequire
+     * @memberOf AbstractNode#
+     * @return {function} A AMD `require` function.
+     * @protected
+     * @abstract
+     */
+
+    requireManyAsync: function(depRefs) {
+      // For dependencies which are _not_ AMD special dependencies.
+      const waitPromises = [];
+      const L = depRefs.length;
+      const depValues = new Array(L);
+      const systemJS = this.root._systemJS;
+      for (let i = 0; i < L; i++) {
+        this.getDependency(depRefs[i], function(normalizedDepRef, value, hasDep) {
+          if (hasDep) {
+            depValues[i] = value;
+          } else {
+            const waitPromise = systemJS.import(normalizedDepRef)
+              .then(createDepSetter(depValues, i));
+  
+            waitPromises.push(waitPromise);
+          }
+        });
+      }
+
+      return Promise.all(waitPromises).then(constantFun(depValues));
+    },
+
+    requireOne: function(depRef) {
+      
+      const systemJS = this.root._systemJS;
+
+      return this.getDependency(depRef, function(normalizedDepRef, value, hasDep) {
+        if (hasDep) {
+          return value;
+        }
+
+        const depUrl = systemJS.resolve(normalizedDepRef);
+        if (systemJS.has(depUrl)) {
+          return resolveUseDefault(systemJS.get(depUrl));
+        }
+        
+        throw new Error("Dependency '" + normalizedDepRef + "' isn't loaded yet.");
+      });
+    },
+
     getDependency: function(depRef, callback) {
       if (depRef === "require") {
         return callback(depRef, this.require, true);
@@ -1144,26 +1234,7 @@
       }
 
       return callback(this.normalizeDep(depRef), undefined, false);
-    },
-
-    /**
-     * Gets this node's AMD contextual `require` function.
-     * @type {function}
-     * @readonly
-     * @see AbstractNode#_createRequire
-     */
-    get require() {
-      return this.__require || (this.__require = this._createRequire());
     }
-
-    /**
-     * Creates an AMD `require` function which has this node as the context node.
-     * @name _createRequire
-     * @memberOf AbstractNode#
-     * @return {function} A AMD `require` function.
-     * @protected
-     * @abstract
-     */
   });
 
   // #endregion
@@ -1409,8 +1480,9 @@
     getUrl: function(extension) {
       const bundle = this.bundle;
       if (bundle !== null) {
-        // bundle.js#!mid=bundled/module/id
-        return setUrlFragment(bundle.getUrl(extension), URL_MODULE_FRAGMENT + this.id);
+        // bundle.js#!mid=bundle/id#!mid=bundled/module/id
+        // bundle.js#!mid=bundle/id#!mid=plugin/id!resource/name
+        return bundle.getUrl(extension) + URL_MODULE_FRAGMENT + this.id;
       }
 
       return this._getUnbundledUrl(extension);
@@ -1680,7 +1752,7 @@
         // module.js#!mid=module/id
         // bundle.js#!mid=bundle/id
         // plugin.js#!mid=plugin/id
-        url = setUrlFragment(url, URL_MODULE_FRAGMENT + this.id);
+        url = removeUrlFragment(url) + URL_MODULE_FRAGMENT + this.id;
       }
       
       return url;
@@ -1886,9 +1958,13 @@
 
     /** @override */
     _getUnbundledUrl: function(extension) {
-      // plugin.js#!mid=plugin/id!resource/name
-      // bundle.js#!mid=plugin/id!resource/name (when the plugin itself is bundled?)
-      return setUrlFragment(this.plugin.getUrl(extension), URL_MODULE_FRAGMENT + this.id); 
+      // e.g. plugin.getUrl():
+      // - unbundled: plugin.js#!mid=plugin/id
+      // - bundled:   bundle.js#!mid=bundle/id#!mid=plugin/id
+      // e.g. result:
+      // - unbundled: plugin.js#!mid=plugin/id!resource/name
+      // - bundled:   bundle.js#!mid=bundle/id#!mid=plugin/id!resource/name
+      return this.plugin.getUrl(extension) + RESOURCE_SEPARATOR + this.resourceName;
     },
 
     loadWithPlugin: function(pluginInstance, referralNode) {
@@ -2351,7 +2427,6 @@
   function createRequire(node) {
 
     const rootNode = node.root;
-    const systemJS = rootNode._systemJS;
     
     return objectCopy(require, {
       isBrowser: isBrowser,
@@ -2408,54 +2483,9 @@
 
     function require(depRefs, callback, errback) {
       return Array.isArray(depRefs)
-        ? requireManyAsync(depRefs, callback, errback)
-        : requireOneSync(depRefs);
-    }
-
-    function requireManyAsync(depRefs, callback, errback) {
-
-      // For dependencies which are _not_ AMD special dependencies.
-      const waitPromises = [];
-
-      const L = depRefs.length;
-      const depValues = new Array(L);
-      
-      for (let i = 0; i < L; i++) {
-        node.getDependency(depRefs[i], function(normalizedDepRef, value, hasDep) {
-          if (hasDep) {
-            depValues[i] = value;
-          } else {
-            const waitPromise = systemJS.import(normalizedDepRef)
-              .then(createDepSetter(depValues, i));
-  
-            waitPromises.push(waitPromise);
-          }
-        });
-      }
-
-      Promise
-        .all(waitPromises)
-        .then(function() {
-          callback.apply(null, depValues);
-        }, errback);
-
-      return require;
-    }
-
-    function requireOneSync(depRef) {
-
-      return node.getDependency(depRef, function(normalizedDepRef, value, hasDep) {
-        if (hasDep) {
-          return value;
-        }
-
-        const depUrl = systemJS.resolve(normalizedDepRef);
-        if (systemJS.has(depUrl)) {
-          return resolveUseDefault(systemJS.get(depUrl));
-        }
-        
-        throw new Error("Dependency '" + normalizedDepRef + "' isn't loaded yet.");
-      });
+        ? node.requireManyAsync(depRefs)
+          .then(function(depValues) { callback.apply(null, depValues); }, errback)
+        : node.requireOne(depRefs);
     }
   }
 
@@ -2654,7 +2684,6 @@
   // #endregion
 
   // #region Utilities
-
   function constantFun(value) {
     return function() {
       return value;
@@ -2803,11 +2832,26 @@
     return index < 0 ? url : url.substring(0, index);
   }
 
-  function setUrlFragment(url, fragment) {
-    const index = url.indexOf("#");
-    return index < 0
-      ? (url + fragment)
-      : (url.substring(0, index) + fragment);
+  function parseUrlWithModuleFragment(url) {
+    
+    let index = url.indexOf(URL_MODULE_FRAGMENT);
+    if (index < 0) {
+      return null;
+    }
+
+    const LEN = URL_MODULE_FRAGMENT.length;
+
+    const scriptUrl = url.substring(0, index);
+    let scriptName = url.substring(index + LEN);
+    let bundledName = null;
+
+    index = scriptName.indexOf(URL_MODULE_FRAGMENT);
+    if (index >= 0) {
+      bundledName = scriptName.substring(index + LEN);
+      scriptName = scriptName.substring(0, index);
+    }
+    
+    return [scriptUrl, scriptName, bundledName];
   }
 
   // "/a" - origin relative
@@ -2826,10 +2870,7 @@
   }
 
   function parseResourceId(id) {
-    const index = id.indexOf(RESOURCE_SEPARATOR);
-    return index !== -1
-      ? [id.substring(0, index), id.substring(index + 1)]
-      : null;
+    return splitAt(id, RESOURCE_SEPARATOR);
   }
 
   function isResourceId(id) {
@@ -2845,6 +2886,13 @@
       _export({ default: value, __useDefault: true });
       return {};
     }];
+  }
+
+  function splitAt(text, sep) {
+    const index = text.indexOf(sep);
+    return index >= 0 
+      ? [text.substring(0, index), text.substring(index + sep.length)]
+      : null;
   }
   // #endregion
 

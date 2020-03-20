@@ -56,6 +56,7 @@
 				"deps": ["./amd-dependencyA", "amd-tests/amd-dependencyB"],
 				"exports": "myGlobal.prop",
 				"init": function(depA, depB) {
+
 				}
 			}
 		},
@@ -182,6 +183,7 @@
 			assertResolve("amd-tests-global-alias/amd-anonymous", baseUrl + "src/temp/tests/amd-anonymous.js#!mid=amd-tests/amd-anonymous");
 			assertResolve("amd-tests/amd-pluginA!foo", baseUrl + "src/temp/tests/amd-pluginA.js#!mid=amd-tests/amd-pluginA!foo");
 			assertResolve("amd-tests/amd-plugin-unloaded!foo", baseUrl + "src/temp/tests/amd-plugin-unloaded.js#!mid=amd-tests/amd-plugin-unloaded!foo_unnormalized");
+			assertResolve("amd-bundleA-bundled-module1", baseUrl + "src/temp/tests/amd-bundleA.js#!mid=amd-tests/amd-bundleA#!mid=amd-bundleA-bundled-module1");
 		},
 		function() {
 			assertCanonicalId(baseUrl + "src/temp/tests/amd-anonymous.js", "amd-tests/amd-anonymous");
@@ -189,6 +191,9 @@
 
 			assertCanonicalId("foo#!mid=a/b/c", "a/b/c");
 			assertCanonicalId("foo", null);
+
+			assertCanonicalId(baseUrl + "src/temp/tests/amd-bundleA.js#!mid=amd-tests/amd-bundleA#!mid=amd-bundleA-bundled-module1",
+				"amd-bundleA-bundled-module1");
 		},
 		function() {
 			return new Promise(function(resolve, reject) {
