@@ -1300,6 +1300,17 @@
      * @abstract
      */
 
+    applyUrlArgs: function(url) {
+      const urlArgs = this.root.urlArgs;
+      if (urlArgs && !isBlobUrl(url)) {
+        // Append any query parameters to URL.
+        // Function should detect if ? or & is needed...
+        url += urlArgs(this.id || url, url);
+      }
+
+      return url;
+    },
+
     /**
      * Gets the configuration of this node, if any; `null`, otherwise.
      * 
@@ -1382,7 +1393,10 @@
 
     /** @override */
     getUrl: function(extension) {
-      return extension ? (this.__url + extension) : this.__url;
+
+      const url = extension ? (this.__url + extension) : this.__url;
+
+      return this.applyUrlArgs(url);
     },
 
     /** @override */
@@ -1739,15 +1753,7 @@
           }
         }
         
-        const urlArgs = this.root.urlArgs;
-        if (urlArgs) {
-          const isBlobUrl = isDataOrBlobUrl && RE_URL_BLOB.test(url);
-          if (!isBlobUrl) {
-            // Append any query parameters to URL.
-            // Function should detect if ? or & is needed...
-            url += urlArgs(this.id, url);
-          }
-        }
+        url = this.applyUrlArgs(url);
 
         // module.js#!mid=module/id
         // bundle.js#!mid=bundle/id
@@ -2863,6 +2869,10 @@
 
   function isDataOrBlobUrl(text) {
     return RE_URL_DATA_OR_BLOB.test(text);
+  }
+
+  function isBlobUrl(text) {
+    return RE_URL_BLOB.test(text);
   }
 
   function isBareName(text) {
