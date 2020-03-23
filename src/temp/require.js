@@ -28,7 +28,7 @@
   
   const RE_JS_EXT = /\.js$/i;
   // Absolute or Protocol Relative or Origin Relative
-  const RE_URL_ABSOLUTE = /^\/|[\w\+\.\-]+:/i;
+  const RE_URL_ABSOLUTE = /^\/|[\w+.\-]+:/i;
   const RE_URL_BLOB = /^blob:/i;
   const RE_URL_DATA_OR_BLOB = /^(data|blob):/i;
   const RE_RESOURCE_ID_UNNORMALIZED = /_unnormalized\d+$/;
@@ -146,7 +146,7 @@
    * The `AmdSystemJSMixin` mixin class adds support for AMD modules to SystemJS.
    * 
    * To that end, the following methods are overridden:
-   * [_init]{@link AmdSystemJSMixin#_mixin},
+   * [_init]{@link AmdSystemJSMixin#_init},
    * [resolve]{@link AmdSystemJSMixin#resolve},
    * [instantiate]{@link AmdSystemJSMixin#instantiate} and
    * [getRegister]{@link AmdSystemJSMixin#getRegister}.
@@ -167,7 +167,7 @@
   
   objectCopy(SystemJS.prototype, /** @lends AmdSystemJSMixin# */{
 
-     /** @override */
+    /** @override */
     _init: function() {
       
       base._init.call(this);
@@ -185,7 +185,7 @@
       /**
        * Gets the root node of the AMD module's namespace.
        * 
-       * @memberof AmdSystemJSMixin#
+       * @memberOf AmdSystemJSMixin#
        * @type {RootNode}
        * @readonly
        */
@@ -197,8 +197,8 @@
        * 
        * Filled in by calling the {@link AmdSystemJSMixin#__queueAmdDef} method.
        * 
-       * @memberof AmdSystemJSMixin#
-       * @type {Array.<({id: string?, deps: string[], execute: function})>}
+       * @memberOf AmdSystemJSMixin#
+       * @type {Array.<({id: string?, deps: Array.<string>, execute: function})>}
        * @readonly
        * @private
        */
@@ -207,12 +207,12 @@
       /**
        * When not `undefined`, the {@link AmdSystemJSMixin#getRegister} method returns this value.
        * 
-       * @memberof AmdSystemJSMixin#
+       * @memberOf AmdSystemJSMixin#
        * @type {Array|undefined}
        * @private
        * 
        * @see AmdSystemJSMixin#getRegister
-       * @see AmdSystemJSMixin#__processRegister
+       * @see AmdSystemJSMixin#_processRegister
        */
       this.__forcedGetRegister = undefined;
     },
@@ -431,7 +431,7 @@
      * @return {Array|undefined} A SystemJS register or `undefined`.
      * @override
      * 
-     * @see AmdSystemJSMixin#__processRegister
+     * @see AmdSystemJSMixin#_processRegister
      */
     getRegister: function() {
 
@@ -468,12 +468,12 @@
      * the SystemJS register given in argument `baseRegister` is returned.
      * 
      * It is expected that a script file contains either AMD _or_ SystemJS definitions.
-     * 
+     *
+     * @param {?SimpleNode} namedImportNode - The simple node representing a named import; `null`, if there isn't one.
      * @param {function() : RegularNode} getScriptNode - A function which obtains the script node being loaded.
-     * @param {SimpleNode?} namedImportNode - The simple node representing a named import; `null`, if there isn't one.
-     * @param {Array} baseRegister - The SystemJS register returned by 
      * the base implementation, {@link SystemJS#instantiate}. Assuming it is defined.
-     * @param {Array?} [shimDeps] - The dependencies of a shimmed module.
+     * @param {object?} scriptShim - The shim configuration of the script module.
+     * @param {Array} baseRegister - The SystemJS register returned by
      * @return {Array} A SystemJS register.
      * @private
      */
@@ -519,7 +519,7 @@
 
         // Now that the plugin is loaded, ask for the original resource again.
         // The resourceNode argument represents an "alias" node for the original node.
-        : this.import(resourceNode.originalId, referralUrl)
+        : this.import(resourceNode.originalId, referralUrl);
 
       // Convert the resource value to a SystemJS register.
       return resourceValuePromise.then(constantRegister);
@@ -563,7 +563,7 @@
     /**
      * Queues an AMD (module definition).
      * 
-     * @param {string?} id - The AMD identifier of the AMD (definition).
+     * @param {?string} id - The AMD identifier of the AMD (definition).
      * @param {Array.<string>} deps - An array of AMD references of the dependencies of the AMD (definition), possibly empty.
      * @param {function} execute - The AMD factory function.
      * @protected
@@ -577,7 +577,7 @@
      * Processes an AMD (module definition) and registers a SystemJS register under its URL.
      * 
      * @param {AbstractChildNode} scriptNode - The node of the script being loaded.
-     * @param {string?} id - The AMD identifier of the AMD (definition).
+     * @param {?string} id - The AMD identifier of the AMD (definition).
      * @param {Array.<string>} deps - An array of AMD references of the dependencies of the AMD (definition).
      * @param {function} execute - The AMD factory function.
      * @return {boolean} `true` if an AMD module with the given identifier or that of `loadNode` was found.
@@ -698,9 +698,6 @@
    *               .isNormalized: varies
    *               .plugin:       SimpleNode
    *               .resourceName: string?
-   * 
-   * 
-   * RegularNode := SimpleNode | AnonymousNode
    * ```
    *
    * @name AbstractNode
@@ -708,7 +705,7 @@
    * 
    * @description Constructs a node.
    * @constructor
-   * @param {Object.<string, string>?} aliasMap - The map of aliases to use for this node.
+   * @param {?Object.<string, string>} aliasMap - The map of aliases to use for this node.
    */
   function AbstractNode(aliasMap) {
 
@@ -727,7 +724,7 @@
     /**
      * Gets the array of attached child nodes. Lazily created.
      * 
-     * @type {Array.<AbstractNamedNode>?}
+     * @type {?Array.<AbstractNamedNode>}
      * @readonly
      * @private
      */
@@ -794,7 +791,7 @@
     /**
      * Gets the identifier of this module, if any; `null`, otherwise.
      * 
-     * @type {string?}
+     * @type {?string}
      * @readonly
      */
     get id() {
@@ -806,7 +803,7 @@
      * 
      * @name parent
      * @memberOf AbstractNode#
-     * @type {AbstractNode?}
+     * @type {?AbstractNode}
      * @readonly
      * @abstract
      */
@@ -816,7 +813,7 @@
      * 
      * @name parentId
      * @memberOf AbstractNode#
-     * @type {string?}
+     * @type {?string}
      * @readonly
      * @abstract
      */
@@ -825,7 +822,7 @@
      * Gets the name by which this module is known by its parent module, 
      * if any; `null`, otherwise.
      * 
-     * @type {string?}
+     * @type {?string}
      * @readonly
      */
     get name() {
@@ -835,7 +832,7 @@
     /**
      * Gets the array of attached child modules, if any; `null` otherwise.
      * 
-     * @type {Array.<AbstractNamedNode>?}
+     * @type {?Array.<AbstractNamedNode>}
      * @readonly
      */
     get children() {
@@ -852,7 +849,7 @@
      * should be created detached from their parents.
      * Only applies if `createIfMissing` is `true`.
      * 
-     * @return {AbstractNamedNode?} The child node, if any; `null` otherwise.
+     * @return {?AbstractNamedNode} The child node, if any; `null` otherwise.
      */
     childByName: function(name, createIfMissing, createDetached) {
       let child = getOwn(this.__byName, name) || null;
@@ -892,7 +889,7 @@
       this.__byName[child.name] = child;
     },
 
-    // @virtual
+    /** @overridable */
     getRelative: function(normalizedId, createIfMissing, createDetached) {
       
       let parent = this;
@@ -1140,12 +1137,12 @@
      *    url = url + this.urlArgs(load-id, url)
      * 6. url <- setUrlFragment(url, "#!mid=<id>")
      * 
-     * @param {string?} [extension=] - The extension to use (e.g. `".css"`).
+     * @param {?string} [extension=] - The extension to use (e.g. `".css"`).
      * When `null`, no extension is used.
      * When `undefined`, the default extension is used (`".js"` for simple modules).
      * 
-     * @return {string?} The url if one can be determined; `null`, otherwise.
-     * @virtual
+     * @return {?string} The url if one can be determined; `null`, otherwise.
+     * @overridable
      */
     getUrl: function(extension) {
       return null;
@@ -1188,6 +1185,7 @@
      * @abstract
      */
 
+    /** @public */
     requireManyAsync: function(depRefs) {
       // For dependencies which are _not_ AMD special dependencies.
       const waitPromises = [];
@@ -1248,6 +1246,11 @@
   // endregion
 
   // region AbstractChildNode Class
+  /**
+   * @class
+   * @extends AbstractNode
+   * @abstract
+   */
   function AbstractChildNode(parent, aliasMap) {
     
     AbstractNode.call(this, aliasMap);
@@ -1302,12 +1305,18 @@
      * Gets the URL of this module.
      * 
      * @name url
-     * @memberof AbstractChildNode#
-     * @type {string?}
+     * @memberOf AbstractChildNode#
+     * @type {?string}
      * @readonly
      * @abstract
      */
 
+    /**
+     * Applies the configured {@link RootNode#urlArgs}, if any, to the given URL.
+     *
+     * @param {string} url - The URL to apply URL arguments to.
+     * @return {string} The transformed URL.
+     */
     applyUrlArgs: function(url) {
       const urlArgs = this.root.urlArgs;
       if (urlArgs && !isBlobUrl(url)) {
@@ -1324,15 +1333,20 @@
      * 
      * @name config
      * @memberOf AbstractChildNode#
-     * @type {object?}
+     * @type {?object}
      * @readonly
      * @abstract
      */
 
+    /** @private */
     __getOrCreateAmdModule() {
       return this.__amdModule || this.__initAmdModule();
     },
 
+    /**
+     * @private
+     * @internal
+     */
     __initAmdModule: function() {
       if (DEBUG && this.__amdModule) {
         throw new Error("Invalid State!");
@@ -1370,7 +1384,7 @@
     /** @protected */
     _assertAttached: function() {
       if (this.isDetached) {
-        throw new Error("Operation invalid on dettached module nodes.");
+        throw new Error("Operation invalid on detached module nodes.");
       }
     },
 
@@ -1382,6 +1396,10 @@
   // endregion
 
   // region AnonymousNode Class
+  /**
+   * @class
+   * @extends AbstractChildNode
+   */
   function AnonymousNode(url, parent) {
 
     if (DEBUG && !(url || parent || !parent.isRoot)) {
@@ -1466,7 +1484,7 @@
     /**
      * Gets or sets this modules's bundle module.
      * 
-     * @type {AbstractNamedNode?}
+     * @type {?AbstractNamedNode}
      */
     get bundle() {
       return this.__bundle;
@@ -1514,13 +1532,13 @@
      * Gets the URL of this module for the case where it is not bundled.
      * 
      * @name _getUnbundledUrl
-     * @memberof AbstractNamedNode#
+     * @memberOf AbstractNamedNode#
      * @method
-     * @param {string?} [extension=] - The extension to use (e.g. `".css"`).
+     * @param {?string} [extension] - The extension to use (e.g. `".css"`).
      * When `null`, no extension is used.
      * When `undefined`, the default extension is used (`".js"` for simple modules).
      * 
-     * @return {string?} The URL.
+     * @return {?string} The URL.
      * 
      * @readonly
      * @abstract
@@ -1559,6 +1577,10 @@
   // endregion
 
   // region SimpleNode Class
+  /**
+   * @class
+   * @extends AbstractNamedNode
+   */
   function SimpleNode(name/*, parent, isDetached*/) {
 
     if (DEBUG && isResourceId(name)) {
@@ -1584,7 +1606,7 @@
     /**
      * The shimming configuration, if any.
      * 
-     * @type {?({deps: ?Array.<string>, factory: function?})}
+     * @type {?({deps: ?Array.<string>, factory: ?function})}
      * @private
      */
     this.__shim = null;
@@ -1603,7 +1625,7 @@
      * even when a bare name (without starting with `./`).
      * If the value has the extension `.js`, if is removed.
      * 
-     * @type {AbstractNamedNode?}
+     * @type {?AbstractNamedNode}
      * @readonly
      * @see AbstractNamedNode#setMain
      */
@@ -1616,7 +1638,7 @@
      * 
      * Should be a simple module identifier.
      * 
-     * @param {string?} relativeId - A relative identifier to the main sub-module of this module.
+     * @param {?string} relativeId - A relative identifier to the main sub-module of this module.
      * The identifier is considered relative to this module,
      * even when a bare name (without starting with `./`).
      * If the value has the extension `.js`, it is removed.
@@ -1643,7 +1665,7 @@
      * 
      * When set, a trailing slash is removed.
      * 
-     * @type {string?}
+     * @type {?string}
      * @see AbstractNamedNode#path
      */
     get fixedPath() {
@@ -1657,6 +1679,7 @@
       const fixedPathNew = value ? removeTrailingSlash(value) : null;
       if (fixedPathNew !== this.__fixedPath) {
         this._invalidateRegularUrl(function applyChange() {
+          /** @this SimpleNode# */
           this.__fixedPath = fixedPathNew;
           this.__invalidatePath();
         });
@@ -1671,7 +1694,7 @@
      * and this module's [name]{@link AbstractNode#name}.
      * If the none of the ascendant modules has a specified `fixedPath`, `null` is returned.
      * 
-     * @type {string?}
+     * @type {?string}
      * @readonly
      */
     get path() {
@@ -1773,10 +1796,11 @@
     },
 
     /** 
-     * The regular part of the URL.
+     * Gets the regular part of the URL.
      * 
-     * @type {string?}
+     * @type {?string}
      * @private
+     *
      * @see SimpleNode#_invalidateRegularUrl
      * @see SimpleNode#__buildRegularUrl
      * @see SimpleNode#__isIndexedByRegularUrl
@@ -1889,6 +1913,10 @@
   });
   // endregion
 
+  /**
+   * @typedef {SimpleNode | AnonymousNode} RegularNode
+   */
+
   // region ResourceNode Class
   /**
    * - normalize id issues resulting in schizophrenia upon unification?
@@ -1903,13 +1931,16 @@
    *   - should work like anonymous modules.
    *   - should be child of root / have root as parent.
    *   - but then name is the whole composed id?
+   *
+   * @class
+   * @extends AbstractNamedNode
    */
   function ResourceNode(name, parent, isDetached) {
 
     const isUnnormalized = isUnnormalizedId(name);
 
     // All unnormalized nodes are necessarily detached.
-    const isDetachedEf = isUnnormalized || !!isDetached
+    const isDetachedEf = isUnnormalized || !!isDetached;
     
     AbstractNamedNode.call(this, name, parent, isDetachedEf);
 
@@ -2025,6 +2056,10 @@
 
   // region RootNode Class
 
+  /**
+   * @class
+   * @extends AbstractNode
+   */
   function RootNode(systemJS) {
 
     const aliasMap = Object.create(null);
@@ -2066,7 +2101,7 @@
      * 
      * The default is `"./"`.
      * 
-     * @type {string?}
+     * @type {?string}
      * @private
      */
     this.__baseUrl = "./";
@@ -2075,7 +2110,7 @@
      * A function which receives a module identifier and its URL
      * and returns a new URL possibly containing additionall query parameters.
      * 
-     * @type {(function(string, string): string)?}
+     * @type {?(function(string, string): string)}
      * @private
      */
     this.__urlArgs = null;
@@ -2152,10 +2187,12 @@
 
     set urlArgs(value) {
       if (typeof value === 'string') {
-          var urlArgs = value;
-          value = function(id, url) {
-            return (url.indexOf('?') === -1 ? '?' : '&') + urlArgs;
-          };
+
+        const urlArgs = value;
+
+        value = function(id, url) {
+          return (url.indexOf('?') === -1 ? '?' : '&') + urlArgs;
+        };
       }
       // else assume it's a function or null.
 
@@ -2199,7 +2236,7 @@
 
       const baseUrl = config.baseUrl;
       if (baseUrl !== undefined) {
-        this.basePath = baseUrl;
+        this.baseUrl = baseUrl;
       }
   
       const urlArgs = config.urlArgs;
@@ -2288,8 +2325,7 @@
      * @param {string} url - The URL of the module. Assumed normalized.
      * No special cases are tested such as `.` or `..` path segments.
      * 
-     * @return {string?} The canonical identifier or `null`.
-     * @private
+     * @return {?string} The canonical identifier or `null`.
      */
     canonicalIdByUrl: function(url) {
       
@@ -2307,6 +2343,8 @@
       
       let state = STATE_INIT;
       let indexQuery = -1;
+
+      /** @type {?string} */
       let urlPrevious = null;
       let idSuffix = "";
 
@@ -2415,8 +2453,8 @@
      * Only called for nodes having (or stopping to have) a {@link AbstractNamedNode#fixedPath}.
      * 
      * @param {AbstractNamedNode} childNode - The descendant node.
-     * @param {string?} regularUrlNew - The new regular URL value.
-     * @param {string?} regularUrlOld - The old regular URL value.
+     * @param {?string} regularUrlNew - The new regular URL value.
+     * @param {?string} regularUrlOld - The old regular URL value.
      * @internal
      * @private
      * @see AbstractNamedNode#url
@@ -2452,7 +2490,7 @@
        * 
        * @param {string} moduleNamePlusExt - The module name plus an optional extension.
        * 
-       * @return {string?} The url if one can be determined; `null`, otherwise.
+       * @return {?string} The url if one can be determined; `null`, otherwise.
        */
       toUrl: function(moduleNamePlusExt) {
         
