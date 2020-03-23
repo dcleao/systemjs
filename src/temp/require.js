@@ -2347,7 +2347,7 @@
             state = STATE_FIRST_PATH_SEGMENT;
           } else {
             // E.g. `foo.org/bar.js?a=b&c=d`
-            ur = url.substring(0, index);
+            url = url.substring(0, index);
             // E.g. `foo.org/bar.js?a=b`
           }
         } else if (state === STATE_FIRST_PATH_SEGMENT) {
