@@ -39,84 +39,91 @@
 
   let unnormalizedCounter = 1;
 
-  // *** - MVP issue.
-  //
-  // General
-  // -------
-  // TODO: Check license.
-  // TODO: Check cycle detection is properly handled
-  // TODO: Check proper error handling
-  // TODO: Support for other environments (Rhino?).
-  // TODO: "Minify" code / identifiers / structure.
-  // TODO: Complete/Review documentation
-  // TODO: Unit tests...
-  // 
-  // General Features
-  // ----
-  // TODO: .JS <> bare interop? *** 
-  //       Compose <node.id> with .js?
-  // TODO: trimDots -> absolutizeId ***
-  // TODO: Shared general config?
-  // TODO: RequireJS supports mapping regular modules to resource modules.
-  // TODO: Implement canonicalIdByUrl for Import Maps URLs.
-  // TODO: Flag to not overwrite define, require? Keep backup?
-  // TODO: Flag to allow top-level modules without a specified path (fallback to `name`)?
-  //
-  // Config
-  // ------
-  // TODO: config.deps, config.callback (using setTimeout to let any following extras to be installed)
-  //       relationship with data-main and `<script type="systemjs-module" src="import:name"></script>`
-  // 
-  // Require
-  // -------
-  // TODO: root.require.undef ***
-  // TODO: require.defined
-  // TODO: require.specified
-  //
-  // Loader Plugins
-  // --------------
-  // TODO: config argument ***
-  //       what needs to be done to maintain config on pair and will it then
-  //       subsume the use of nodes?? RequireJS derives bundleMap and pkgs index properties
-  //       from the config.
-  // TODO: onload.fromText *** - eval text as if it were a module script being loaded  
-  //       assuming its id is resourceName.
-  //
-  // JS
-  // ---
-  // TODO: __log
-  // TODO: "__proto__" map lookup loophole
+  /*
 
-  // NOT SUPPORTED
-  // =============
-  // 
-  // AMD
-  // ---
-  // https://github.com/amdjs/amdjs-api
-  //
-  // - Modules with paths/URLs with fragments, as they're used for other purposes.
-  // - A dependency ending with ".js" being considered an URL and not a module identifier.
-  //   - The top-level require's `jsExtRegExp` property; used to filter out dependencies that are already URLs.
-  // - Being able to `map` a simple identifier to a resource identifier.
-  // - Being able to specify `paths` fallbacks; when an array is provided, only the first value is considered.
-  // - Being able to shim a resource module.
-  //
-  // RequireJS
-  // ---------
-  // https://requirejs.org
-  // 
-  // - CommonJS-style factory: detection of `require(.)` dependencies in factory function code, using `toString`.
-  // - require.defined/specified ? Are these worth it?
-  // - require.onError, require.createNode, require.load
-  // - error.requireModules on error handlers allowing to undef and then retry loading of modules with different config/paths,
-  //   allowing functionality equivalent to paths fallbacks
-  //   (https://requirejs.org/docs/api.html#errbacks)
-  // - config.nodeRequire / all special NodeJS/CommonJS features
-  // - Environments such as: PSn, Opera...
-  // - Creating new require contexts.
-  // - Specifying `data-main` in the `script` element used to load the AMD/RequireJS extra;
-  //   the `skipDataMain` configuration property is also not supported.
-  //   -> It's equivalent to add <script type="systemjs-module" src="import:name"></script>
+  *** - MVP issue.
+
+  General
+  -------
+  TODO: Check license.
+  TODO: Check cycle detection is properly handled
+  TODO: Check proper error handling
+  TODO: Support for other environments (Rhino?).
+  TODO: "Minify" code / identifiers / structure.
+  TODO: Complete/Review documentation
+  TODO: Unit tests...
+
+  General Features
+  ----
+  TODO: .JS <> bare interop? ***
+        Compose <node.id> with .js?
+  TODO: trimDots -> absolutizeId ***
+  TODO: Shared general config?
+  TODO: RequireJS supports mapping regular modules to resource modules.
+  TODO: Implement canonicalIdByUrl for Import Maps URLs.
+  TODO: Flag to not overwrite define, require? Keep backup?
+  TODO: Flag to allow top-level modules without a specified path (fallback to `name`)?
+
+  Config
+  ------
+  TODO: config.deps, config.callback (using setTimeout to let any following extras to be installed)
+        relationship with data-main and `<script type="systemjs-module" src="import:name"></script>`
+
+  Require
+  -------
+  TODO: root.require.undef ***
+  TODO: require.defined
+  TODO: require.specified
+
+  Loader Plugins
+  --------------
+  TODO: config argument ***
+        what needs to be done to maintain config on pair and will it then
+        subsume the use of nodes?? RequireJS derives bundleMap and pkgs index properties
+        from the config.
+  TODO: onload.fromText *** - eval text as if it were a module script being loaded
+        assuming its id is resourceName.
+
+  JS
+  ---
+  TODO: __log
+  TODO: "__proto__" map lookup loophole
+
+  */
+
+  /*
+
+  NOT SUPPORTED
+  =============
+
+  AMD
+  ---
+  https://github.com/amdjs/amdjs-api
+
+  - Modules with paths/URLs with fragments, as they're used for other purposes.
+  - A dependency ending with ".js" being considered an URL and not a module identifier.
+    - The top-level require's `jsExtRegExp` property; used to filter out dependencies that are already URLs.
+  - Being able to `map` a simple identifier to a resource identifier.
+  - Being able to specify `paths` fallbacks; when an array is provided, only the first value is considered.
+  - Being able to shim a resource module.
+
+  RequireJS
+  ---------
+  https://requirejs.org
+
+  - CommonJS-style factory: detection of `require(.)` dependencies in factory function code, using `toString`.
+  - require.defined/specified ? Are these worth it?
+  - require.onError, require.createNode, require.load
+  - error.requireModules on error handlers allowing to undef and then retry loading of modules with different config/paths,
+    allowing functionality equivalent to paths fallbacks
+    (https://requirejs.org/docs/api.html#errbacks)
+  - config.nodeRequire / all special NodeJS/CommonJS features
+  - Environments such as: PSn, Opera...
+  - Creating new require contexts.
+  - Specifying `data-main` in the `script` element used to load the AMD/RequireJS extra;
+    the `skipDataMain` configuration property is also not supported.
+    -> It's equivalent to add <script type="systemjs-module" src="import:name"></script>
+  */
 
   // ---
 
@@ -130,7 +137,7 @@
    */
   const SystemJS = global.System.constructor;
   
-  // #region AmdSystemJS class
+  // region AmdSystemJS class
 
   // A copy of the methods of the SystemJS prototype which will be overridden.
   const base = assignProps({}, SystemJS.prototype, ["_init", "resolve", "instantiate", "getRegister"]);
@@ -629,9 +636,9 @@
       return register;
     }
   });
-  // #endregion
+  // endregion
 
-  // #region AbstractNode Class
+  // region AbstractNode Class
 
   /**
    * @classdesc The `AbstractNode` class describes a module in the AMD identifier namespace.
@@ -901,7 +908,7 @@
       return node;
     },
 
-    // #region normalization
+    // region normalization
 
     // Supports AMD plugins.
     // When DEBUG and !Lax: 
@@ -951,8 +958,10 @@
     // - Returns `null` if empty.
     //
     // Full normalization:
+    // - remove .js extension, if any
     // - applies maps
     // - resolves package main
+    // - in the end, re-adds .js extension, if removed.
     // isLax: allows "*" and the "!" character; for use in resource ids.
     normalizeSimple: function(simpleId, isFull, isLax) {
       
@@ -967,6 +976,7 @@
       let normalizedId = absolutizeId(simpleId, this.parentId);
       
       if (isFull) {
+
         // Mapping.
         normalizedId = this.applyMap(normalizedId);
 
@@ -987,9 +997,7 @@
 
     // require(["idOrAbsURL", ...]
     normalizeDep: function(depId) {
-      return isAbsoluteUrl(depId) 
-        ? depId 
-        : this.normalize(depId, true);
+      return isAbsoluteUrl(depId) ? depId : this.normalize(depId, true, false);
     },
 
     // define(id, ...
@@ -1152,7 +1160,7 @@
     get url() {
       return this.getUrl();
     },
-    // #endregion
+    // endregion
 
     configMap: function(mapSpec) {
 
@@ -1237,9 +1245,9 @@
     }
   });
 
-  // #endregion
+  // endregion
 
-  // #region AbstractChildNode Class
+  // region AbstractChildNode Class
   function AbstractChildNode(parent, aliasMap) {
     
     AbstractNode.call(this, aliasMap);
@@ -1371,9 +1379,9 @@
       return createRequire(this);
     }
   });
-  // #endregion
+  // endregion
 
-  // #region AnonymousNode Class
+  // region AnonymousNode Class
   function AnonymousNode(url, parent) {
 
     if (DEBUG && !(url || parent || !parent.isRoot)) {
@@ -1404,9 +1412,9 @@
       return null;
     }
   });
-  // #endregion
+  // endregion
   
-  // #region AbstractNamedNode Class
+  // region AbstractNamedNode Class
   function AbstractNamedNode(name, parent, isDetached) {
 
     if (DEBUG && (!name || !parent)) {
@@ -1548,9 +1556,9 @@
       });
     },
   });
-  // #endregion
+  // endregion
 
-  // #region SimpleNode Class
+  // region SimpleNode Class
   function SimpleNode(name/*, parent, isDetached*/) {
 
     if (DEBUG && isResourceId(name)) {
@@ -1879,9 +1887,9 @@
       return base.resolve.call(this.root._systemJS, url);
     }
   });
-  // #endregion
+  // endregion
 
-  // #region ResourceNode Class
+  // region ResourceNode Class
   /**
    * - normalize id issues resulting in schizophrenia upon unification?
    * - all _unnormalized_ should be created detached (although the unnormalized counter already ensures no reuse)
@@ -2013,9 +2021,9 @@
       }
     }
   });
-  // #endregion
+  // endregion
 
-  // #region RootNode Class
+  // region RootNode Class
 
   function RootNode(systemJS) {
 
@@ -2426,9 +2434,9 @@
     }
   });
   
-  // #endregion
+  // endregion
 
-  // #region Amd and SystemJS stuff
+  // region Amd and SystemJS stuff
 
   function createRequire(node) {
 
@@ -2687,9 +2695,9 @@
 
     return simpleId;
   }
-  // #endregion
+  // endregion
 
-  // #region Utilities
+  // region Utilities
   function constantFun(value) {
     return function() {
       return value;
@@ -2904,7 +2912,7 @@
       ? [text.substring(0, index), text.substring(index + sep.length)]
       : null;
   }
-  // #endregion
+  // endregion
 
   (function initGlobal() {
     
