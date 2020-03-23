@@ -64,7 +64,7 @@
   //
   // Config
   // ------
-  // TODO: config.deps, config.callback (using setTimout to let any following extras to be installed)
+  // TODO: config.deps, config.callback (using setTimeout to let any following extras to be installed)
   //       relationship with data-main and `<script type="systemjs-module" src="import:name"></script>`
   // 
   // Require
@@ -77,7 +77,7 @@
   // --------------
   // TODO: config argument ***
   //       what needs to be done to maintain config on pair and will it then
-  //       subsume the use of nodes?? Requirejs derives bundleMap and pkgs index properties
+  //       subsume the use of nodes?? RequireJS derives bundleMap and pkgs index properties
   //       from the config.
   // TODO: onload.fromText *** - eval text as if it were a module script being loaded  
   //       assuming its id is resourceName.
@@ -136,15 +136,15 @@
   const base = assignProps({}, SystemJS.prototype, ["_init", "resolve", "instantiate", "getRegister"]);
 
   /**
-   * The `amdSystemJSMixin` mixin adds support for AMD modules to SystemJS.
+   * The `AmdSystemJSMixin` mixin class adds support for AMD modules to SystemJS.
    * 
    * To that end, the following methods are overridden:
-   * [_init]{@link amdSystemJSMixin._mixin},
-   * [resolve]{@link amdSystemJSMixin.resolve},
-   * [instantiate]{@link amdSystemJSMixin.instantiate} and
-   * [getRegister]{@link amdSystemJSMixin.getRegister}.
+   * [_init]{@link AmdSystemJSMixin#_mixin},
+   * [resolve]{@link AmdSystemJSMixin#resolve},
+   * [instantiate]{@link AmdSystemJSMixin#instantiate} and
+   * [getRegister]{@link AmdSystemJSMixin#getRegister}.
    * 
-   * The property [amd]{@link amdSystemJSMixin.amd}
+   * The property [amd]{@link AmdSystemJSMixin#amd}
    * gives access to a hierarchical object model of modules, 
    * each represented by a node in the hierarchy, 
    * reflecting the current AMD configuration.
@@ -153,12 +153,12 @@
    * would be costly (memory leak or waste).
    * For these cases, missing nodes can be obtained _dettached_ from the hierarchy.
    * 
-   * @name amdSystemJSMixin
-   * @type {object}
+   * @name AmdSystemJSMixin
+   * @class
    * @mixin
    */
   
-  objectCopy(SystemJS.prototype, /** @lends amdSystemJSMixin */{
+  objectCopy(SystemJS.prototype, /** @lends AmdSystemJSMixin# */{
 
      /** @override */
     _init: function() {
@@ -178,7 +178,7 @@
       /**
        * Gets the root node of the AMD module's namespace.
        * 
-       * @memberof amdSystemJSMixin.
+       * @memberof AmdSystemJSMixin#
        * @type {RootNode}
        * @readonly
        */
@@ -188,9 +188,9 @@
        * Queue of AMD definitions added during the load of a script file
        * and which are pending processing.
        * 
-       * Filled in by calling the {@link amdSystemJSMixin.__queueAmdDef} method.
+       * Filled in by calling the {@link AmdSystemJSMixin#__queueAmdDef} method.
        * 
-       * @memberof amdSystemJSMixin.
+       * @memberof AmdSystemJSMixin#
        * @type {Array.<({id: string?, deps: string[], execute: function})>}
        * @readonly
        * @private
@@ -198,14 +198,14 @@
       this.__amdDefQueue = [];
 
       /**
-       * When not `undefined`, the {@link amdSystemJSMixin.getRegister} method returns this value.
+       * When not `undefined`, the {@link AmdSystemJSMixin#getRegister} method returns this value.
        * 
-       * @memberof amdSystemJSMixin.
+       * @memberof AmdSystemJSMixin#
        * @type {Array|undefined}
        * @private
        * 
-       * @see amdSystemJSMixin.getRegister
-       * @see amdSystemJSMixin.__processRegister
+       * @see AmdSystemJSMixin#getRegister
+       * @see AmdSystemJSMixin#__processRegister
        */
       this.__forcedGetRegister = undefined;
     },
@@ -424,7 +424,7 @@
      * @return {Array|undefined} A SystemJS register or `undefined`.
      * @override
      * 
-     * @see amdSystemJSMixin.__processRegister
+     * @see AmdSystemJSMixin#__processRegister
      */
     getRegister: function() {
 
@@ -522,7 +522,7 @@
      * Processes a _new_ SystemJS register. 
      * 
      * Subclasses may process the new register by either overriding 
-     * the {@link amdSystemJSMixin.getRegister} method or this method, directly.
+     * the {@link AmdSystemJSMixin#getRegister} method or this method, directly.
      * 
      * @param {Array} register - A SystemJS register to process.
      * @return {Array} The processed SystemJS register, possibly identical to `register`.
