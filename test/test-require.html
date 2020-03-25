@@ -98,7 +98,7 @@
 	}
 	
 	// ---
-	function assertNormalize(id, expectedId) {
+	function assertNormalizeDep(id, expectedId) {
 		let normalizedId = System.amd.normalizeDep(id);
 		if (normalizedId) {
 			normalizedId = normalizedId.replace(/_unnormalized\d+$/, "_unnormalized");
@@ -165,35 +165,41 @@
 		function() {
 			return assert.equal(
 				require.toUrl("amd-tests/amd-module-dep.css"), 
-				baseUrl + "src/temp/tests/amd-module-dep.css#!mid=amd-tests/amd-module-dep");
+				baseUrl + "src/temp/tests/amd-module-dep.css");
 		},
 		function() {
-			assertNormalize("amd-tests/amd-anonymous", "amd-tests/amd-anonymous");
-			assertNormalize("amd-tests/amd-module-dep", "amd-tests/amd-module-dep");
-			assertNormalize("amd-tests-global-alias", "amd-tests");
-			assertNormalize("amd-tests-global-alias/amd-anonymous", "amd-tests/amd-anonymous");
-			assertNormalize("amd-tests/amd-bundleA", "amd-tests/amd-bundleA");
-			assertNormalize("amd-tests/amd-pluginA", "amd-tests/amd-pluginA");
-			assertNormalize("amd-tests/amd-pluginA!foo", "amd-tests/amd-pluginA!foo");
-			assertNormalize("amd-tests/amd-plugin-unloaded!foo", "amd-tests/amd-plugin-unloaded!foo_unnormalized");
+            assertNormalizeDep("amd-tests/amd-anonymous", "amd-tests/amd-anonymous.js");
+            assertNormalizeDep("amd-tests/amd-anonymous.js", "amd-tests/amd-anonymous.js");
+            assertNormalizeDep("amd-tests/amd-module-dep", "amd-tests/amd-module-dep.js");
+            assertNormalizeDep("amd-tests-global-alias", "amd-tests.js");
+            assertNormalizeDep("amd-tests-global-alias/amd-anonymous", "amd-tests/amd-anonymous.js");
+            assertNormalizeDep("amd-tests/amd-bundleA", "amd-tests/amd-bundleA.js");
+            assertNormalizeDep("amd-tests/amd-pluginA", "amd-tests/amd-pluginA.js");
+            assertNormalizeDep("amd-tests/amd-pluginA!foo", "amd-tests/amd-pluginA.js!foo");
+            assertNormalizeDep("amd-tests/amd-plugin-unloaded.js!foo", "amd-tests/amd-plugin-unloaded.js!foo_unnormalized");
 		},
 		function() {
-			assertResolve("amd-tests/amd-anonymous", baseUrl + "src/temp/tests/amd-anonymous.js#!mid=amd-tests/amd-anonymous");
-			assertResolve("amd-tests/amd-module-dep", baseUrl + "src/temp/tests/amd-module-dep.js#!mid=amd-tests/amd-module-dep");
-			assertResolve("amd-tests-global-alias/amd-anonymous", baseUrl + "src/temp/tests/amd-anonymous.js#!mid=amd-tests/amd-anonymous");
-			assertResolve("amd-tests/amd-pluginA!foo", baseUrl + "src/temp/tests/amd-pluginA.js#!mid=amd-tests/amd-pluginA!foo");
-			assertResolve("amd-tests/amd-plugin-unloaded!foo", baseUrl + "src/temp/tests/amd-plugin-unloaded.js#!mid=amd-tests/amd-plugin-unloaded!foo_unnormalized");
-			assertResolve("amd-bundleA-bundled-module1", baseUrl + "src/temp/tests/amd-bundleA.js#!mid=amd-tests/amd-bundleA#!mid=amd-bundleA-bundled-module1");
+            assertResolve("amd-tests/amd-anonymous.js", baseUrl + "src/temp/tests/amd-anonymous.js#!mid=amd-tests/amd-anonymous.js");
+			assertResolve("amd-tests/amd-anonymous", baseUrl + "src/temp/tests/amd-anonymous.js#!mid=amd-tests/amd-anonymous.js");
+			assertResolve("amd-tests/amd-module-dep", baseUrl + "src/temp/tests/amd-module-dep.js#!mid=amd-tests/amd-module-dep.js");
+			assertResolve("amd-tests-global-alias/amd-anonymous", baseUrl + "src/temp/tests/amd-anonymous.js#!mid=amd-tests/amd-anonymous.js");
+            assertResolve("amd-tests/amd-pluginA.js!foo", baseUrl + "src/temp/tests/amd-pluginA.js#!mid=amd-tests/amd-pluginA.js!foo");
+			assertResolve("amd-tests/amd-pluginA!foo", baseUrl + "src/temp/tests/amd-pluginA.js#!mid=amd-tests/amd-pluginA.js!foo");
+            assertResolve("amd-tests/amd-pluginA!foo.js", baseUrl + "src/temp/tests/amd-pluginA.js#!mid=amd-tests/amd-pluginA.js!foo");
+			assertResolve("amd-tests/amd-plugin-unloaded!foo", baseUrl + "src/temp/tests/amd-plugin-unloaded.js#!mid=amd-tests/amd-plugin-unloaded.js!foo_unnormalized");
+			assertResolve("amd-bundleA-bundled-module1", baseUrl + "src/temp/tests/amd-bundleA.js#!mid=amd-tests/amd-bundleA.js#!mid=amd-bundleA-bundled-module1.js");
 		},
 		function() {
-			assertCanonicalId(baseUrl + "src/temp/tests/amd-anonymous.js", "amd-tests/amd-anonymous");
-			assertCanonicalId(baseUrl + "src/temp/tests/amd-module-dep.js", "amd-tests/amd-module-dep");
+			assertCanonicalId(baseUrl + "src/temp/tests/amd-anonymous.js", "amd-tests/amd-anonymous.js");
+			assertCanonicalId(baseUrl + "src/temp/tests/amd-module-dep.js", "amd-tests/amd-module-dep.js");
 
 			assertCanonicalId("foo#!mid=a/b/c", "a/b/c");
-			assertCanonicalId("foo", null);
+            assertCanonicalId("foo.js#!mid=a/b/c", "a/b/c");
+            assertCanonicalId("foo", null);
+			assertCanonicalId("foo.js", null);
 
-			assertCanonicalId(baseUrl + "src/temp/tests/amd-bundleA.js#!mid=amd-tests/amd-bundleA#!mid=amd-bundleA-bundled-module1",
-				"amd-bundleA-bundled-module1");
+			assertCanonicalId(baseUrl + "src/temp/tests/amd-bundleA.js#!mid=amd-tests/amd-bundleA#!mid=amd-bundleA-bundled-module1.js",
+				"amd-bundleA-bundled-module1.js");
 		},
 		function() {
 			return new Promise(function(resolve, reject) {
@@ -224,6 +230,11 @@
 					resolve();
 				}, reject);
 			});
-		}
+		},
+        function() {
+            const refNode = System.amd.get("amd-tests/amd-anonymous", true);
+            assert.equal(refNode.normalizeDep("./Model"), "amd-tests/Model.js");
+            assert.equal(refNode.normalizeDep("./Model.js"), "amd-tests/Model.js");
+        }
 	]);
 </script>
