@@ -68,7 +68,8 @@
   General
   -------
   TODO: Check license.
-  TODO: Unit tests, including cycle detection, error handling
+  TODO: Unit tests, including cycle detection, error handling, integrate with existing tests
+  TODO: Integrate with existing extras and extras build tool.
   TODO: Support for other environments (PhantomJS, Rhino?)
   TODO: Complete/Review documentation
 
@@ -96,8 +97,8 @@
   --------------
   TODO: config argument ***
         - what needs to be done to maintain config on pair and will it then
-        subsume the use of nodes?? RequireJS derives bundleMap and pkgs index properties
-        from the config.
+          subsume the use of nodes?? RequireJS derives bundleMap and pkgs index properties
+          from the config.
         - what information are known AMD plugins reading from the general config? custom config options?
 
   TODO: onload.fromText *** - eval text as if it were a module script being loaded
