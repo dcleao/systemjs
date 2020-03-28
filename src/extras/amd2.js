@@ -92,6 +92,7 @@
   TODO: root.require.undef ***
   TODO: require.defined
   TODO: require.specified
+  TODO: Fix define not working for non-global SystemJS instance.
 
   Loader Plugins
   --------------
