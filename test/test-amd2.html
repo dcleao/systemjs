@@ -16,62 +16,51 @@
 	//	document.write()
 </script>
 
+<link rel="stylesheet" type="text/css" href="../node_modules/mocha/mocha.css"/>
 <script src="../node_modules/mocha/mocha.js"></script>
-<script>
-	self.assert = {
-		ok: function (val) {
-			this.equal(!!val, true);
-			return val;
-		},
-		equal: function equal(a, b) {
-			if (a !== b)
-				throw new Error('Expected "' + a + '" to be "' + b + '"');
-			return a;
-		},
-		fail: function (msg) {
-			throw new Error(msg);
-		}
-	};
-</script>
+
 <script src="../dist/system.js"></script>
-<script src="../dist/extras/use-default.js"></script>    <!-- .import -->
-<script src="../src/temp/require.js"></script>           <!-- .resolve | .instantiate -->
-<script src="../dist/extras/named-register.js"></script> <!-- .resolve | .instantiate -->
+<script src="../dist/extras/use-default.js"></script>
+<script src="../dist/extras/amd2.js"></script>
+<script src="../dist/extras/named-register.js"></script>
 
 <script>
-	System.amd.require.config({
-		"paths": {
-			"amd-tests": "../src/temp/tests"
-		},
-		"map": {
-			"*": {
-				"amd-tests-global-alias": "amd-tests"
-			},
-			"amd-tests/amd-scoped-dep": {
-				"A": "amd-tests/amd-dependencyA"
-			}
-		},
-		"shim": {
-			"amd-tests/amd-shimmed": {
-				"deps": ["./amd-dependencyA", "amd-tests/amd-dependencyB"],
-				"exports": "myGlobal.prop",
-				"init": function(depA, depB) {
+  mocha.setup('tdd');
 
-				}
-			}
-		},
-		"bundles": {
-			"amd-tests/amd-bundleA": [
-				"amd-bundleA-bundled-module1",
-				"amd-bundleA-bundled-module2"
-			]
-		}
-	});
+  self.baseURL = location.href.substr(0, location.href.lastIndexOf('/') + 1);
+  self.rootURL = location.href.substr(0, location.href.substr(0, location.href.lastIndexOf('/')).lastIndexOf('/') + 1);
+  self.assert = {
+    ok: function (val) {
+      this.equal(!!val, true);
+      return val;
+    },
+    equal: function equal(a, b) {
+      if (a !== b)
+        throw new Error('Expected "' + a + '" to be "' + b + '"');
+      return a;
+    },
+    fail: function (msg) {
+      throw new Error(msg);
+    }
+  };
+
+  System.import("./browser/amd2.js")
+    .then(function() {
+      mocha.run(function(failures) {
+        fetch(failures ? "/error" : "/done");
+      });
+    });
+</script>
+
+<div id="mocha"></div>
+
+<script>
 
 	function doTests(funs) {
-		
-		const testFuns = funs.slice();
 
+
+		const testFuns = funs.slice();
+      return;
 		return new Promise(function(resolve) {
 			
 			nextTest();
@@ -119,8 +108,6 @@
 	function assertCanonicalId(url, expectedId) {
 		assert.equal(System.canonicalIdByUrl(url), expectedId);
 	}
-
-	const baseUrl = "http://127.0.0.1:8080/";
 
 	let amdAnonymousLoad1;
 	doTests([
