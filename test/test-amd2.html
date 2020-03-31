@@ -27,6 +27,10 @@
 <script>
   mocha.setup('tdd');
 
+  function createNotEqualError(a, b) {
+    return new Error('Expected "' + a + '" to be "' + b + '"');
+  }
+
   self.baseURL = location.href.substr(0, location.href.lastIndexOf('/') + 1);
   self.rootURL = location.href.substr(0, location.href.substr(0, location.href.lastIndexOf('/')).lastIndexOf('/') + 1);
   self.assert = {
@@ -36,7 +40,55 @@
     },
     equal: function equal(a, b) {
       if (a !== b)
-        throw new Error('Expected "' + a + '" to be "' + b + '"');
+        throw createNotEqualError(a, b);
+      return a;
+    },
+    deepEqual: function deepEqual(a, b) {
+      if (a !== b) {
+        if (typeof a !== typeof b) {
+          throw createNotEqualError(a, b);
+        }
+
+        if (typeof a === "object") {
+          if (a === null || b === null) {
+            throw createNotEqualError(a, b);
+          }
+
+          const A = a.constructor;
+          const B = b.constructor;
+          if (A !== B) {
+            throw createNotEqualError(a, b);
+          }
+
+          if (A === Array) {
+            let L = a.length;
+            if (b.length !== L) {
+              throw createNotEqualError(a, b);
+            }
+
+            let i = -1;
+            while (++i < L) {
+              deepEqual(a[i], b[i]);
+            }
+          }
+
+          if (A === Object || A == null) {
+            const propsA = Object.keys(A);
+            if (propsA.length !== Object.keys(B).length) {
+              throw createNotEqualError(a, b);
+            }
+
+            propsA.forEach(function(pA) {
+              if (!Object.prototype.hasOwnProperty.call(b, pA)) {
+                throw createNotEqualError(a, b);
+              }
+
+              deepEqual(a[pA], b[pB]);
+            });
+          }
+        }
+      }
+
       return a;
     },
     fail: function (msg) {
@@ -59,7 +111,7 @@
 	function doTests(funs) {
 
 
-		const testFuns = funs.slice();
+      const testFuns = funs.slice();
       return;
 		return new Promise(function(resolve) {
 			
@@ -108,96 +160,64 @@
 	function assertCanonicalId(url, expectedId) {
 		assert.equal(System.canonicalIdByUrl(url), expectedId);
 	}
-
-	let amdAnonymousLoad1;
+    
 	doTests([
 		function() {
-			return System.import("amd-tests/amd-anonymous").then(function(value) {
-				return (amdAnonymousLoad1 = value);
-			});
+			return System.import("fixtures/pluginA!foo-resource");
 		},
 		function() {
-			return System.import("amd-tests/amd-module-dep");
+			return System.import("fixtures/pluginA!foo-resource");
 		},
 		function() {
-			return System.import("amd-tests-global-alias/amd-anonymous").then(function(amdAnonymousLoad2) {
-				return assert.equal(amdAnonymousLoad2, amdAnonymousLoad1);
-			});
-		},
-		function() {
-			return System.import("amd-tests/amd-scoped-dep");
-		},
-		function() {
-			return System.import("amd-tests/amd-bundleA").then(function(value) {
-				assert.equal(value, undefined);
-			});
-		},
-		function() {
-			return System.import("amd-tests/amd-pluginA!foo-resource");
-		},
-		function() {
-			return System.import("amd-tests/amd-pluginA!foo-resource");
-		},
-		function() {
-			return System.import("amd-tests/amd-pluginA!bar-resource");
-		},
-		function() {
-			return System.import("amd-tests/amd-plugin-dep");
-		},
-		function() {
-			return System.import("amd-tests/amd-shimmed").then(function(value) {
-				return assert.equal(value, "amd-shimmed");
-			});
+			return System.import("fixtures/pluginA!bar-resource");
 		},
 		function() {
 			return assert.equal(
-				require.toUrl("amd-tests/amd-module-dep.css"), 
-				baseUrl + "src/temp/tests/amd-module-dep.css");
+				require.toUrl("fixtures/module-dep.css"), 
+				baseUrl + "src/temp/tests/module-dep.css");
 		},
 		function() {
-            assertNormalizeDep("amd-tests/amd-anonymous", "amd-tests/amd-anonymous.js");
-            assertNormalizeDep("amd-tests/amd-anonymous.js", "amd-tests/amd-anonymous.js");
-            assertNormalizeDep("amd-tests/amd-module-dep", "amd-tests/amd-module-dep.js");
-            assertNormalizeDep("amd-tests-global-alias", "amd-tests.js");
-            assertNormalizeDep("amd-tests-global-alias/amd-anonymous", "amd-tests/amd-anonymous.js");
-            assertNormalizeDep("amd-tests/amd-bundleA", "amd-tests/amd-bundleA.js");
-            assertNormalizeDep("amd-tests/amd-pluginA", "amd-tests/amd-pluginA.js");
-            assertNormalizeDep("amd-tests/amd-pluginA!foo", "amd-tests/amd-pluginA.js!foo");
-            assertNormalizeDep("amd-tests/amd-plugin-unloaded.js!foo", "amd-tests/amd-plugin-unloaded.js!foo_unnormalized");
+            assertNormalizeDep("fixtures/anonymous", "fixtures/anonymous.js");
+            assertNormalizeDep("fixtures/anonymous.js", "fixtures/anonymous.js");
+            assertNormalizeDep("fixtures-global-alias", "fixtures.js");
+            assertNormalizeDep("fixtures-global-alias/anonymous", "fixtures/anonymous.js");
+            assertNormalizeDep("fixtures/bundleA", "fixtures/bundleA.js");
+            assertNormalizeDep("fixtures/pluginA", "fixtures/pluginA.js");
+            assertNormalizeDep("fixtures/pluginA!foo", "fixtures/pluginA.js!foo");
+            assertNormalizeDep("fixtures/plugin-unloaded.js!foo", "fixtures/plugin-unloaded.js!foo_unnormalized");
 		},
 		function() {
-            assertResolve("amd-tests/amd-anonymous.js", baseUrl + "src/temp/tests/amd-anonymous.js#!mid=amd-tests/amd-anonymous.js");
-			assertResolve("amd-tests/amd-anonymous", baseUrl + "src/temp/tests/amd-anonymous.js#!mid=amd-tests/amd-anonymous.js");
-			assertResolve("amd-tests/amd-module-dep", baseUrl + "src/temp/tests/amd-module-dep.js#!mid=amd-tests/amd-module-dep.js");
-			assertResolve("amd-tests-global-alias/amd-anonymous", baseUrl + "src/temp/tests/amd-anonymous.js#!mid=amd-tests/amd-anonymous.js");
-            assertResolve("amd-tests/amd-pluginA.js!foo", baseUrl + "src/temp/tests/amd-pluginA.js#!mid=amd-tests/amd-pluginA.js!foo");
-			assertResolve("amd-tests/amd-pluginA!foo", baseUrl + "src/temp/tests/amd-pluginA.js#!mid=amd-tests/amd-pluginA.js!foo");
-            assertResolve("amd-tests/amd-pluginA!foo.js", baseUrl + "src/temp/tests/amd-pluginA.js#!mid=amd-tests/amd-pluginA.js!foo");
-			assertResolve("amd-tests/amd-plugin-unloaded!foo", baseUrl + "src/temp/tests/amd-plugin-unloaded.js#!mid=amd-tests/amd-plugin-unloaded.js!foo_unnormalized");
-			assertResolve("amd-bundleA-bundled-module1", baseUrl + "src/temp/tests/amd-bundleA.js#!mid=amd-tests/amd-bundleA.js#!mid=amd-bundleA-bundled-module1.js");
+            assertResolve("fixtures/anonymous.js", baseUrl + "src/temp/tests/anonymous.js#!mid=fixtures/anonymous.js");
+			assertResolve("fixtures/anonymous", baseUrl + "src/temp/tests/anonymous.js#!mid=fixtures/anonymous.js");
+			assertResolve("fixtures/module-dep", baseUrl + "src/temp/tests/module-dep.js#!mid=fixtures/module-dep.js");
+			assertResolve("fixtures-global-alias/anonymous", baseUrl + "src/temp/tests/anonymous.js#!mid=fixtures/anonymous.js");
+            assertResolve("fixtures/pluginA.js!foo", baseUrl + "src/temp/tests/pluginA.js#!mid=fixtures/pluginA.js!foo");
+			assertResolve("fixtures/pluginA!foo", baseUrl + "src/temp/tests/pluginA.js#!mid=fixtures/pluginA.js!foo");
+            assertResolve("fixtures/pluginA!foo.js", baseUrl + "src/temp/tests/pluginA.js#!mid=fixtures/pluginA.js!foo");
+			assertResolve("fixtures/plugin-unloaded!foo", baseUrl + "src/temp/tests/plugin-unloaded.js#!mid=fixtures/plugin-unloaded.js!foo_unnormalized");
+			assertResolve("bundleA-bundled-module1", baseUrl + "src/temp/tests/bundleA.js#!mid=fixtures/bundleA.js#!mid=bundleA-bundled-module1.js");
 		},
 		function() {
-			assertCanonicalId(baseUrl + "src/temp/tests/amd-anonymous.js", "amd-tests/amd-anonymous.js");
-			assertCanonicalId(baseUrl + "src/temp/tests/amd-module-dep.js", "amd-tests/amd-module-dep.js");
+			assertCanonicalId(baseUrl + "src/temp/tests/anonymous.js", "fixtures/anonymous.js");
 
 			assertCanonicalId("foo#!mid=a/b/c", "a/b/c");
             assertCanonicalId("foo.js#!mid=a/b/c", "a/b/c");
             assertCanonicalId("foo", null);
 			assertCanonicalId("foo.js", null);
 
-			assertCanonicalId(baseUrl + "src/temp/tests/amd-bundleA.js#!mid=amd-tests/amd-bundleA#!mid=amd-bundleA-bundled-module1.js",
-				"amd-bundleA-bundled-module1.js");
+			assertCanonicalId(baseUrl + "src/temp/tests/bundleA.js#!mid=fixtures/bundleA#!mid=bundleA-bundled-module1.js",
+				"bundleA-bundled-module1.js");
 		},
 		function() {
 			return new Promise(function(resolve, reject) {
 				// Async require
 				System.amd.require([
-					"amd-tests/amd-anonymous",
-					"amd-tests/amd-module-dep"
+					"fixtures/anonymous",
+					"fixtures/module-dep"
 				], function(anonymous, dep) {
 					
-					assert.ok(/^amd-anonymous:/.test(anonymous));
-					assert.ok(/^amd-module-dep:/.test(dep));
+					assert.ok(/^anonymous:/.test(anonymous));
+					assert.ok(/^module-dep:/.test(dep));
 					
 					resolve();
 				}, reject);
@@ -206,22 +226,22 @@
 		function() {
 			return new Promise(function(resolve, reject) {
 				System.amd.require([
-					"amd-tests/amd-anonymous",
-					"amd-tests/amd-module-dep"
+					"fixtures/anonymous",
+					"fixtures/module-dep"
 				], function(anonymous, dep) {
 					
 					// Sync require
-					assert.equal(System.amd.require("amd-tests/amd-anonymous"), anonymous);
-					assert.equal(System.amd.require("amd-tests/amd-module-dep"), dep);
+					assert.equal(System.amd.require("fixtures/anonymous"), anonymous);
+					assert.equal(System.amd.require("fixtures/module-dep"), dep);
 					
 					resolve();
 				}, reject);
 			});
 		},
         function() {
-            const refNode = System.amd.get("amd-tests/amd-anonymous", true);
-            assert.equal(refNode.normalizeDep("./Model"), "amd-tests/Model.js");
-            assert.equal(refNode.normalizeDep("./Model.js"), "amd-tests/Model.js");
+            const refNode = System.amd.get("fixtures/anonymous", true);
+            assert.equal(refNode.normalizeDep("./Model"), "fixtures/Model.js");
+            assert.equal(refNode.normalizeDep("./Model.js"), "fixtures/Model.js");
         }
 	]);
 </script>

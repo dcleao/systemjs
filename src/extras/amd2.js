@@ -1279,6 +1279,7 @@
 
     this.__parent = parent;
     this.__root = parent.root;
+    this.__isLoaded = false;
 
     /**
      * The AMD "module" dependency. Lazily created.
@@ -1316,6 +1317,18 @@
 
     get registeredExports() {
       return resolveUseDefault(this.root.sys.get(this.url)) || null;
+    },
+
+    get isLoaded() {
+      return this.__isLoaded;
+    },
+
+    $setLoaded: function() {
+      if (DEBUG && this.__isLoaded) {
+        throw createError("Invalid state.");
+      }
+
+      this.__isLoaded = true;
     },
 
     /**
@@ -1444,6 +1457,7 @@
         throw createError("Invalid State!");
       }
 
+      const node = this;
       const url = this.url;
       let hasExports = false;
       let exports;
@@ -1457,13 +1471,17 @@
         uri: url,
 
         config: function() {
-          return this.config || {};
-        }.bind(this),
+          return node.config || {};
+        },
+
+        get $hasExports() {
+          return hasExports;
+        },
 
         get exports() {
           if (!hasExports) {
             hasExports = true;
-            exports = {};
+            exports = node.isLoaded ? node.registeredExports : {};
           }
 
           return exports;
@@ -2835,9 +2853,6 @@
    */
   function createAmdRegister(node, amdInfo) {
 
-    const module = node.$initAmdModule();
-    const exports = module.exports;
-
     // Dependencies which are _not_ AMD special dependencies.
     const registerDepIds = [];
     const registerDepSetters = [];
@@ -2865,20 +2880,30 @@
 
     function declareAmd(_export, _context) {
 
-      _export({ default: exports, __useDefault: true });
+      _export({ default: undefined, __useDefault: true });
 
       return {
         setters: registerDepSetters,
         execute: function() {
-          const exported = amdInfo.execute.apply(exports, depValues);
-          if (exported !== undefined) {
-            // Replace exports value.
-            module.exports = exported;
-            _export("default", exported);
+          let exports;
+          try {
+            exports = amdInfo.execute.apply(undefined, depValues);
+          } finally {
+            node.$setLoaded();
+          }
 
-          } else if (exports !== module.exports) {
-            // Requested "module" and replaced exports, internally.
-            _export("default", module.exports);
+          // <-> module.exports
+          const module = node.amdModule;
+          if (module) {
+            if (exports !== undefined) {
+              module.exports = exports;
+            } else if (module.$hasExports) {
+              exports = module.exports;
+            }
+          }
+
+          if (exports !== undefined) {
+            _export("default", exports);
           }
         }
       };
