@@ -1,6 +1,6 @@
 suite("SystemJS AMD2 Extra Tests", function() {
 
-  const fixturesPath = "./fixtures/browser/amd2";
+  const FIXTURES_PATH = "./fixtures/browser/amd2";
 
   // region Utilities
   function assertNormalizeDep(systemJS, id, expectedId) {
@@ -37,7 +37,7 @@ suite("SystemJS AMD2 Extra Tests", function() {
 
     systemJS.amd.require.config({
       "paths": {
-        "fixtures": fixturesPath
+        "fixtures": FIXTURES_PATH
       },
       "map": {
         "*": {
@@ -68,18 +68,150 @@ suite("SystemJS AMD2 Extra Tests", function() {
   }
   // endregion
 
-  test("Can load a script which has an anonymous AMD definition", function () {
+  function configSpec(systemJS, spec) {
+    systemJS.amd.require.config(spec);
+    return systemJS;
+  }
 
-    const systemJS = createSystemJS();
+  function configBasic(systemJS, extraSpec) {
 
-    systemJS.amd.require.config({
+    return configSpec(systemJS, {
       "paths": {
-        "fixtures": fixturesPath
+        "fixtures": FIXTURES_PATH
       }
     });
+  }
 
-    return systemJS.import("fixtures/amd-anonymous").then(function(value) {
-      assert.ok(/amd-anonymous/.test(value));
+  suite("Script with a single anonymous AMD definition", function() {
+
+    test("A module is only instantiated the first time it is imported", function () {
+
+      const systemJS = configBasic(createSystemJS());
+
+      return systemJS.import("fixtures/anonymous").then(function(value1) {
+
+        assert.ok(value1 instanceof Object);
+
+        return systemJS.import("fixtures/anonymous").then(function(value2) {
+          assert.equal(value1, value2);
+        });
+      });
+    });
+
+    suite("Dependencies", function() {
+
+      test("Can load a module which has no dependencies", function () {
+
+        const systemJS = configBasic(createSystemJS());
+
+        return systemJS.import("fixtures/anonymous").then(function(value) {
+          assert.ok(value instanceof Object);
+          assert.equal(value.name, "anonymous");
+        });
+      });
+
+      test("Can load a module which has the special 'module' dependency", function () {
+
+        const systemJS = configBasic(createSystemJS());
+
+        return systemJS.import("fixtures/dependency-special-module").then(function(value) {
+          assert.ok(value instanceof Object);
+          assert.equal(value.name, "dependency-special-module");
+        });
+      });
+
+      test("Can load a module which has a dependency known as a contextual alias", function () {
+
+        const systemJS = configSpec(configBasic(createSystemJS()), {
+          "map": {
+            "fixtures/dependency-context-alias": {
+              "A": "fixtures/dependencyA"
+            }
+          }
+        });
+
+        return systemJS.import("fixtures/dependency-context-alias").then(function(value) {
+          assert.ok(value instanceof Object);
+          assert.equal(value.name, "dependency-context-alias");
+          assert.equal(value.dependency, "dependencyA");
+        });
+      });
+
+      test("Can load a module which has a resource dependency", function () {
+
+        const systemJS = configBasic(createSystemJS());
+
+        return systemJS.import("fixtures/dependency-resource").then(function(value) {
+          assert.ok(value instanceof Object);
+          assert.equal(value.name, "dependency-resource");
+
+          const resource = value.resource;
+          assert.equal(resource.plugin, "fixtures/pluginA.js");
+          assert.equal(resource.resource, "foobar");
+        });
+      });
+    });
+
+    suite("Shimmed", function() {
+
+      function configShim(systemJS) {
+
+        return configSpec(systemJS, {
+          "shim": {
+            "fixtures/shimmed": {
+              "deps": ["./dependencyA", "fixtures/dependencyB"],
+              "exports": "myGlobal.prop",
+              "init": function(depA, depB) {
+
+              }
+            }
+          }
+        });
+      }
+
+      test("Can load a module which is shimmed and extract its 'exports' variable path", function () {
+
+        const systemJS = configShim(configBasic(createSystemJS()));
+
+        return systemJS.import("fixtures/shimmed").then(function(value) {
+          assert.equal(value, "shimmed");
+        });
+      });
+    });
+  });
+
+  suite("Bundle script", function() {
+
+    function configBundle(systemJS) {
+
+      return configSpec(systemJS, {
+        "bundles": {
+          "fixtures/bundleA": [
+            "bundleA-bundled-module1",
+            "bundleA-bundled-module2"
+          ]
+        }
+      });
+    }
+
+    test("Can load the bundle module", function () {
+
+      const systemJS = configBundle(configBasic(createSystemJS()));
+
+      return systemJS.import("fixtures/bundleA").then(function(value) {
+        assert.equal(value, undefined);
+      });
+    });
+
+    test("Can load a module which is bundled in a bundle module", function () {
+
+      const systemJS = configBundle(configBasic(createSystemJS()));
+
+      return systemJS.import("bundleA-bundled-module1").then(function(value) {
+        assert.ok(value instanceof Object);
+        assert.equal(value.name, "bundleA-bundled-module1");
+        assert.equal(value.id, "bundleA-bundled-module1.js");
+      });
     });
   });
 });
