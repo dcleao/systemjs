@@ -8,11 +8,11 @@ suite("SystemJS AMD2 Extra Tests", function() {
 
   // region Utilities
   function createSystemJS() {
-    return System;
+    // return System;
 
     // TODO: AMD2 is currently broken for non-global SystemJS...
-    // const SystemJS = System.constructor;
-    // return new SystemJS();
+    const SystemJS = System.constructor;
+    return new SystemJS();
   }
 
   function configSpec(systemJS, spec) {
@@ -213,7 +213,7 @@ suite("SystemJS AMD2 Extra Tests", function() {
         const systemJS = setupBasicSystemJS();
 
         return new Promise(function(resolve, reject) {
-          System.amd.require([
+          systemJS.amd.require([
             "fixtures/anonymous",
             "fixtures/dependency-special-module"
           ], function(anonymous, dep) {
@@ -363,8 +363,14 @@ suite("SystemJS AMD2 Extra Tests", function() {
       testCase("fixtures/anonymous.js", FIXTURES_URL + "anonymous.js#!mid=fixtures/anonymous.js");
       testCase("fixtures/anonymous", FIXTURES_URL + "anonymous.js#!mid=fixtures/anonymous.js");
       testCase("fixtures/module-dep", FIXTURES_URL + "module-dep.js#!mid=fixtures/module-dep.js");
-      testCase("fixtures-global-alias/anonymous", FIXTURES_URL + "anonymous.js#!mid=fixtures/anonymous.js");
       testCase("fixtures/plugin-unloaded!foo", FIXTURES_URL + "plugin-unloaded.js#!mid=fixtures/plugin-unloaded.js!foo_unnormalized");
+    });
+
+    suite("global alias", function() {
+
+      const testCase = testResolve.bind(null, setupGlobalAliasSystemJS);
+
+      testCase("fixtures-global-alias/anonymous", FIXTURES_URL + "anonymous.js#!mid=fixtures/anonymous.js");
     });
 
     suite("loaded plugin", function() {

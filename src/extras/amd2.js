@@ -68,7 +68,7 @@
   General
   -------
   TODO: Check license.
-  TODO: Unit tests, including cycle detection, error handling, integrate with existing tests
+  TODO: Unit tests: cycle detection, error handling...
   TODO: Integrate with existing extras and extras build tool.
   TODO: Support for other environments (PhantomJS, Rhino?)
   TODO: Complete/Review documentation
@@ -92,7 +92,6 @@
   TODO: root.require.undef ***
   TODO: require.defined
   TODO: require.specified
-  TODO: Fix define not working for non-global SystemJS instance.
 
   Loader Plugins
   --------------
@@ -123,7 +122,6 @@
 
   - Modules with paths/URLs with fragments, as they're used for other purposes.
   - A dependency ending with ".js" being considered an URL and not a module identifier.
-    - The top-level require's `jsExtRegExp` property; used to filter out dependencies that are already URLs.
     - This is required for interoperability with ES6 modules ".js".
   - Being able to `map` a simple identifier to a resource identifier.
   - Being able to specify `paths` fallbacks; when an array is provided, only the first value is considered.
@@ -134,6 +132,7 @@
   https://requirejs.org
 
   - CommonJS-style factory: detection of `require(.)` dependencies in factory function code, using `toString`.
+  - The top-level require's `jsExtRegExp` property; used to filter out dependencies that are already URLs.
   - require.defined/specified ? Are these worth it?
   - require.onError, require.createNode, require.load
   - error.requireModules on error handlers allowing to undef and then retry loading of modules with different config/paths,
@@ -191,6 +190,15 @@
    */
 
   /**
+   * Queue of AMD definitions added during the load of a script file
+   * and which are pending processing.
+   *
+   * @type {Array.<AmdInfo>}
+   * @readonly
+   */
+  const __amdQueue = [];
+
+  /**
    * The `AmdSystemJSMixin` mixin class adds support for AMD modules to SystemJS.
    *
    * To that end, the following methods are overridden:
@@ -237,19 +245,6 @@
        * @readonly
        */
       this.amd = new RootNode(this);
-
-      /**
-       * Queue of AMD definitions added during the load of a script file
-       * and which are pending processing.
-       *
-       * Filled in by calling the {@link AmdSystemJSMixin#$queueAmd} method.
-       *
-       * @memberOf AmdSystemJSMixin#
-       * @type {Array.<AmdInfo>}
-       * @readonly
-       * @private
-       */
-      this.__amdQueue = [];
 
       /**
        * When not `undefined`, the {@link AmdSystemJSMixin#getRegister} method returns this value.
@@ -524,11 +519,10 @@
       // 0|1 <=> false|true
       let foundScriptModule = 0;
 
-      const queue = this.__amdQueue;
-      if (length(queue) > 0) {
+      if (length(__amdQueue) > 0) {
         const scriptNode = getScriptNode();
         let amdInfo;
-        while((amdInfo = queue.shift()) !== undefined) {
+        while((amdInfo = __amdQueue.shift()) !== undefined) {
           foundScriptModule |= this.__processAmd(scriptNode, amdInfo);
         }
       }
@@ -610,7 +604,7 @@
      * @internal
      */
     $queueAmd: function(id, deps, execute) {
-      this.__amdQueue.push({id: id, deps: deps, execute: execute});
+      __amdQueue.push({id: id, deps: deps, execute: execute});
     },
 
     /**
@@ -2396,8 +2390,8 @@
       return node;
     },
 
-    get: function(normalizedId) {
-      return this.getDescendant(normalizedId);
+    get: function(normalizedId, createIfMissing, createDetached) {
+      return this.getDescendant(normalizedId, createIfMissing, createDetached);
     },
 
     $getOrCreate: function(normalizedId, isDetached) {
