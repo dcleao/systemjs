@@ -18,6 +18,7 @@ export { IMPORT_MAP, IMPORT_MAP_PROMISE };
 
 var IMPORT_MAP = hasSymbol ? Symbol() : '#';
 var IMPORT_MAP_PROMISE = hasSymbol ? Symbol() : '$';
+var EMPTY_IMPORT_MAP = Object.freeze({ imports: Object.freeze({}), scopes: Object.freeze({}) });
 
 iterateDocumentImportMaps(function (script) {
   script._t = fetch(script.src).then(function (res) {
@@ -51,7 +52,7 @@ systemJSPrototype.prepareImport = function () {
 
 systemJSPrototype.resolve = function (id, parentUrl) {
   parentUrl = parentUrl || !process.env.SYSTEM_BROWSER && this[BASE_URL] || baseUrl;
-  return resolveImportMap(this[IMPORT_MAP], resolveIfNotPlainOrUrl(id, parentUrl) || id, parentUrl) || throwUnresolved(id, parentUrl);
+  return resolveImportMap(this[IMPORT_MAP] || EMPTY_IMPORT_MAP, resolveIfNotPlainOrUrl(id, parentUrl) || id, parentUrl) || throwUnresolved(id, parentUrl);
 };
 
 function throwUnresolved (id, parentUrl) {
