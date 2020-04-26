@@ -4,7 +4,7 @@ import path from 'path';
 import { terser } from 'rollup-plugin-terser';
 
 const version = JSON.parse(fs.readFileSync('package.json')).version;
-const extras = fs.readdirSync(path.resolve(__dirname, 'src/extras'));
+const extras = fs.readdirSync(path.resolve(__dirname, 'src/extras'), { withFileTypes: true });
 
 const terserOptions = {
   mangle: {
@@ -121,8 +121,12 @@ function mainConfig(name, isMin) {
 }
 
 function extrasConfig(isMin) {
-  return extras.map(extra => {
-    extra = extra.replace('.js', '');
+  return extras.map(extraDirEntry => {
+    if (!extraDirEntry.isFile()) {
+      return null;
+    }
+
+    const extra = extraDirEntry.name.replace('.js', '');
     return {
       input: `src/extras/${extra}.js`,
       output: {
@@ -139,5 +143,5 @@ function extrasConfig(isMin) {
         })
       ]
     };
-  });
+  }).filter(Boolean);
 }
