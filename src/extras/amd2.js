@@ -20,7 +20,6 @@
 
   "use strict";
 
-  const DEBUG = true;
   const O = Object;
   const O_HAS_OWN = prototype(O).hasOwnProperty;
   const REQUIRE_EXPORTS_MODULE = ["require", "exports", "module"];
@@ -279,7 +278,7 @@
 
       } catch (error) {
         // No isAbsoluteUrl URLs here!
-        if (DEBUG && isAbsoluteUrl(specifier)) {
+        if (!process.env.SYSTEM_PRODUCTION && isAbsoluteUrl(specifier)) {
           throw error;
         }
 
@@ -399,7 +398,7 @@
       // If it were not a name in the name registry, resolve would have thrown.
       // All specifiers resolved via AMD or ImportMap are URLs.
       // => `loadUrl` must be an URL.
-      if (DEBUG && !isAbsoluteUrl(loadUrl)) {
+      if (!process.env.SYSTEM_PRODUCTION && !isAbsoluteUrl(loadUrl)) {
         throw createError("Invalid program.");
       }
 
@@ -629,7 +628,7 @@
 
       const url = definedNode.url;
 
-      if (DEBUG) {
+      if (!process.env.SYSTEM_PRODUCTION) {
         // Both of the following cases are the result of misconfiguration and are thus not supported:
         // - If the node has no defined bundle, `scriptNode` could be it.
         // - If the node has no defined fixedPath, `scriptNode.url` could be it.
@@ -927,7 +926,7 @@
      */
     $addChild: function(child) {
 
-      if (DEBUG && (child.parent !== this || this.childByName(child.name))) {
+      if (!process.env.SYSTEM_PRODUCTION && (child.parent !== this || this.childByName(child.name))) {
         throw createError("Invalid argument.");
       }
 
@@ -972,7 +971,7 @@
     // region normalization
 
     // Supports AMD plugins.
-    // When DEBUG and !Lax:
+    // When !process.env.SYSTEM_PRODUCTION and !Lax:
     // - Throws on null id.
     // - Throws on URLs via $normalizeSimple
     //
@@ -989,7 +988,7 @@
         if (!id) {
           return null;
         }
-      } else if (DEBUG) {
+      } else if (!process.env.SYSTEM_PRODUCTION) {
         if (!id) {
           throw createError("Invalid empty id.");
         }
@@ -1044,7 +1043,7 @@
         if (!simpleId) {
           return null;
         }
-      } else if (DEBUG) {
+      } else if (!process.env.SYSTEM_PRODUCTION) {
         assertSimple(simpleId);
       }
 
@@ -1056,7 +1055,7 @@
         normalizedId = this.applyMap(normalizedId);
 
         // For now, assuming map cannot return a resource identifier.
-        if (DEBUG) {
+        if (!process.env.SYSTEM_PRODUCTION) {
           assertSimple(normalizedId);
         }
 
@@ -1318,7 +1317,7 @@
     },
 
     $setLoaded: function() {
-      if (DEBUG && this.__isLoaded) {
+      if (!process.env.SYSTEM_PRODUCTION && this.__isLoaded) {
         throw createError("Invalid state.");
       }
 
@@ -1447,7 +1446,7 @@
      * @internal
      */
     $initAmdModule: function() {
-      if (DEBUG && this.__amdModule) {
+      if (!process.env.SYSTEM_PRODUCTION && this.__amdModule) {
         throw createError("Invalid State!");
       }
 
@@ -1509,7 +1508,7 @@
    */
   function AnonymousNode(url, parent) {
 
-    if (DEBUG && !(url || parent || !parent.isRoot)) {
+    if (!process.env.SYSTEM_PRODUCTION && !(url || parent || !parent.isRoot)) {
       throw createError("Invalid arguments.");
     }
 
@@ -1547,7 +1546,7 @@
    */
   function AbstractNamedNode(name, parent, isDetached) {
 
-    if (DEBUG && (!name || !parent)) {
+    if (!process.env.SYSTEM_PRODUCTION && (!name || !parent)) {
       throw createError("Invalid arguments.");
     }
 
@@ -1710,7 +1709,7 @@
    */
   function SimpleNode(name/*, parent, isDetached*/) {
 
-    if (DEBUG && isResourceId(name)) {
+    if (!process.env.SYSTEM_PRODUCTION && isResourceId(name)) {
       throw createError("Resource must be child of root.");
     }
 
@@ -2092,7 +2091,7 @@
 
     const resourceIdParts = parseResourceId(this.id);
 
-    if (DEBUG) {
+    if (!process.env.SYSTEM_PRODUCTION) {
       if (!parent.isRoot) {
         throw createError("Invalid argument 'parent'.");
       }
@@ -2181,7 +2180,7 @@
 
     loadWithPlugin: function(pluginInstance, referralNode) {
 
-      if (DEBUG && !this.isNormalized) {
+      if (!process.env.SYSTEM_PRODUCTION && !this.isNormalized) {
         throw createError("Invalid operation.");
       }
 
@@ -2619,7 +2618,7 @@
      * @internal
      */
     $indexNode: function(namedNode) {
-      if (DEBUG && this.get(namedNode.id)) {
+      if (!process.env.SYSTEM_PRODUCTION && this.get(namedNode.id)) {
         throw createError("A node with id '" + namedNode.id + "' is already defined.");
       }
 

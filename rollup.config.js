@@ -52,6 +52,22 @@ const terserOptions = {
   warnings: false
 };
 
+// Extra-specific terser options.
+const terserOptionsByExtra = {
+  "amd2": {
+    ...terserOptions,
+    mangle: {
+      ...terserOptions.mangle,
+
+      properties: {
+        // Mangle all properties with a "__" or "$" prefix.
+        // The only exception is the special "__useDefault" property.
+        regex: /^(__|[$])(?!useDefault)/
+      }
+    }
+  }
+};
+
 const buildProd = !process.env.dev;
 
 export default [
@@ -117,7 +133,7 @@ function extrasConfig(isMin) {
         sourcemap: isMin
       },
       plugins: [
-        isMin && terser(terserOptions),
+        isMin && terser(terserOptionsByExtra[extra] || terserOptions),
         replace({
           'process.env.SYSTEM_PRODUCTION': isMin ? 'true' : 'false'
         })
