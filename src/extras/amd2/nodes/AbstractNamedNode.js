@@ -17,7 +17,10 @@
 import {
   classExtend,
   createError,
-  createObject
+  createObject,
+  eachOwn,
+  hasOwn,
+  isArray
 } from "../util.js";
 
 import {
@@ -64,6 +67,8 @@ export default function AbstractNamedNode(name, parent, isDetached) {
    */
   this.__bundle = null;
 
+  this.__config = null;
+
   if (!isDetached) {
     this.__root.$indexNode(this);
     parent.$addChild(this);
@@ -86,6 +91,10 @@ classExtend(AbstractNamedNode, AbstractChildNode, /** @lends AbstractNamedNode# 
     return this.__name;
   },
 
+  get config() {
+    return this.__config;
+  },
+
   /**
    * Gets or sets this modules's bundle module.
    *
@@ -106,6 +115,17 @@ classExtend(AbstractNamedNode, AbstractChildNode, /** @lends AbstractNamedNode# 
         this.__bundle = bundleNew;
       });
     }
+  },
+
+  configConfig: function(config) {
+
+    this.$assertAttached();
+
+    if (!this.__config) {
+      this.__config = {};
+    }
+
+    configMixin(this.__config, config);
   },
 
   configBundle: function(bundleSpec) {
@@ -188,3 +208,24 @@ classExtend(AbstractNamedNode, AbstractChildNode, /** @lends AbstractNamedNode# 
     });
   },
 });
+
+
+// Adapted from RequireJS to merge the _config_ configuration option.
+export function configMixin(target, source) {
+  eachOwn(source, function(value, prop) {
+    if (!hasOwn(target, prop)) {
+      // Not a null object. Not Array. Not RegExp.
+      if (value && typeof value === "object" && !isArray(value) && !(value instanceof RegExp)) {
+        if (!target[prop]) {
+          target[prop] = {};
+        }
+
+        configMixin(target[prop], value);
+      } else {
+        target[prop] = value;
+      }
+    }
+  });
+
+  return target;
+}

@@ -15,13 +15,10 @@
  */
 
 import {
-  global,
   isArray,
   classExtend,
   createError,
   prototype,
-  eachOwn,
-  hasOwn,
   getGlobal,
   stringContains
 } from "../util.js";
@@ -58,8 +55,6 @@ export default function SimpleNode(name/*, parent, isDetached*/) {
   }
 
   AbstractNamedNode.apply(this, arguments);
-
-  this.__config = null;
 
   /**
    * The main node of this node, if any; `null`, otherwise.
@@ -184,10 +179,6 @@ classExtend(SimpleNode, AbstractNamedNode, /** @lends SimpleNode# */{
     return this.__pathCached;
   },
 
-  get config() {
-    return this.__config;
-  },
-
   /**
    * Gets the node's shim AMD information, if any; `null`, otherwise.
    *
@@ -196,17 +187,6 @@ classExtend(SimpleNode, AbstractNamedNode, /** @lends SimpleNode# */{
    */
   get shim() {
     return this.__shim;
-  },
-
-  configConfig: function(config) {
-
-    this.$assertAttached();
-
-    if (!this.__config) {
-      this.__config = {};
-    }
-
-    configMixin(this.__config, config);
   },
 
   configPackage: function(packageSpec) {
@@ -404,27 +384,6 @@ classExtend(SimpleNode, AbstractNamedNode, /** @lends SimpleNode# */{
     return baseSystemJS.resolve.call(this.root.sys, url);
   }
 });
-
-
-// Adapted from RequireJS to merge the _config_ configuration option.
-export function configMixin(target, source) {
-  eachOwn(source, function(value, prop) {
-    if (!hasOwn(target, prop)) {
-      // Not a null object. Not Array. Not RegExp.
-      if (value && typeof value === "object" && !isArray(value) && !(value instanceof RegExp)) {
-        if (!target[prop]) {
-          target[prop] = {};
-        }
-
-        configMixin(target[prop], value);
-      } else {
-        target[prop] = value;
-      }
-    }
-  });
-
-  return target;
-}
 
 /**
  * Creates an AMD execution function for a given shimming specification.

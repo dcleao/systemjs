@@ -106,12 +106,12 @@ let unnormalizedCounter = 1;
  *          | .isDetached:    varies
  *          | .bundle:        SimpleNode?  [.configBundle(.)]
  *          | ._getUnbundledUrl(extension, omitFragment) : string?
+ *          | .config:        object?      [.configConfig(.)]
  *          |
  *          +- SimpleNode
  *          |   .fixedPath: string?         [.path, .configPath(.), .configPackage(.)]
  *          |   .main:      SimpleNode?     [.configPackage(.)]
  *          |   .shim       {deps, factory} [.configShim(.)]
- *          |   .config:    object?         [.configConfig(.)]
  *          |
  *          +- ResourceNode - <plugin>!<resource-name>
  *               .isResource:   true
