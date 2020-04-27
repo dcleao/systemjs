@@ -278,6 +278,13 @@ classExtend(RootNode, AbstractNode, /** @lends RootNode# */{
     processObjectConfig(config.shim, "configShim");
     processObjectConfig(config.config, "configConfig");
     processObjectConfig(config.bundles, "configBundle");
+
+    if (config.deps || config.callback) {
+      // Make sure all extras have been registered when this is called.
+      this.root.sys.nextTick(function() {
+        root.require(config.deps || [], config.callback);
+      });
+    }
   },
 
   /**

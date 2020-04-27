@@ -21,7 +21,7 @@ import { System } from "./amd2/SystemJS.js";
 import "./amd2/AmdSystemJSMixin.js";
 
 if (System.registerRegistry) {
-  throw Error("The named-register.js extra for SystemJS must be included after the require.js extra.");
+  throw Error("The named-register.js extra for SystemJS must be included after the amd2.js extra.");
 }
 
 System.$initAmd();

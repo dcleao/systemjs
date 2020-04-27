@@ -139,18 +139,6 @@ suite("SystemJS AMD2 Extra Tests", function() {
       });
     });
 
-    suite("defined(.)", function() {
-      test("Is defined", function() {
-        assert.equal(typeof require.defined, "function");
-      });
-    });
-
-    suite("specified(.)", function() {
-      test("Is defined", function() {
-        assert.equal(typeof require.specified, "function");
-      });
-    });
-
     suite("require([deps...], callback, errback)", function() {
 
       test("Calls callback when given an empty dependencies array", function() {

@@ -523,7 +523,11 @@ objectCopy(prototype(SystemJS), /** @lends AmdSystemJSMixin# */{
     }
 
     return register;
-  }
+  },
+
+  nextTick: typeof setTimeout !== "undefined" ? function (fn) { setTimeout(fn, 4); } :
+            typeof process !== "undefined" ? process.nextTick :
+            function (fn) { fn(); }
 });
 
 function constantRegister(value) {
