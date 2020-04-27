@@ -151,10 +151,9 @@ classExtend(ResourceNode, AbstractNamedNode, /** @lends ResourceNode# */{
     }
 
     const resourceNode = this;
+    const config = this.root.__pluginsConfig;
 
     return new Promise(function(resolve, reject) {
-
-      const config = {};
 
       const onLoadCallback = createOnloadCallback(resolve, reject);
 

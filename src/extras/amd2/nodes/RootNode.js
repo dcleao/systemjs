@@ -52,6 +52,10 @@ import ResourceNode from "./ResourceNode.js";
 
 const REQUIRE_EXPORTS_MODULE = ["require", "exports", "module"];
 
+const configHandlers = createObject();
+
+initConfigHandlers();
+
 /**
  * @class
  * @extends AbstractNode
@@ -123,6 +127,18 @@ export default function RootNode(systemJS) {
    * @readonly
    */
   this.define = createDefine(this);
+
+  /**
+   * Contains top-level plugin configurations.
+   *
+   * Most plugins use top-level config options only at build time,
+   * but some use top-level config options at "runtime" as well.
+   *
+   * @type {object}
+   * @readonly
+   * @private
+   */
+  this.__pluginsConfig = createObject();
 }
 
 const baseGetDescendant = prototype(AbstractNode).getDescendant;
@@ -238,53 +254,12 @@ classExtend(RootNode, AbstractNode, /** @lends RootNode# */{
    */
   configure: function(config) {
 
-    const baseUrl = config.baseUrl;
-    if (baseUrl !== undefined) {
-      this.baseUrl = baseUrl;
-    }
-
-    const urlArgs = config.urlArgs;
-    if (urlArgs !== undefined) {
-      this.urlArgs = urlArgs;
-    }
-
-    const root = this;
-
-    function getOrCreateSingle(id) {
-      return root.$getOrCreate(assertSimple(id));
-    }
-
-    function processObjectConfig(configById, configMethodName, allowStar) {
-      eachOwn(configById, function(config, id) {
-        const node = allowStar && id === MAP_SCOPE_ANY_MODULE ? root : getOrCreateSingle(id);
-        node[configMethodName](config);
-      });
-    }
-
-    if (config.packages) {
-      config.packages.forEach(function(pkgSpec) {
-        if (pkgSpec) {
-          if (isString(pkgSpec)) {
-            pkgSpec = {name: pkgSpec};
-          }
-
-          getOrCreateSingle(pkgSpec.name).configPackage(pkgSpec);
-        }
-      });
-    }
-
-    processObjectConfig(config.paths, "configPath");
-    processObjectConfig(config.map, "configMap", true);
-    processObjectConfig(config.shim, "configShim");
-    processObjectConfig(config.config, "configConfig");
-    processObjectConfig(config.bundles, "configBundle");
-
-    if (config.deps || config.callback) {
-      // Make sure all extras have been registered when this is called.
-      this.root.sys.nextTick(function() {
-        root.require(config.deps || [], config.callback);
-      });
-    }
+    eachOwn(config, function(value, prop) {
+      if (value !== undefined) {
+        const handler = getOwn(configHandlers, prop) || defaultConfigHandler;
+        handler.call(this, value, prop, config);
+      }
+    }, this);
   },
 
   /**
@@ -582,3 +557,66 @@ function createRootRequire(rootNode) {
   }
 }
 
+function initConfigHandlers() {
+
+  function getOrCreateSimple(root, id) {
+    return root.$getOrCreate(assertSimple(id));
+  }
+
+  function processObjectConfig(root, configById, configMethodName, allowStar) {
+    eachOwn(configById, function(config, id) {
+      const node = allowStar && id === MAP_SCOPE_ANY_MODULE ? root : getOrCreateSimple(root, id);
+      node[configMethodName](config);
+    });
+  }
+
+  function handleDepsAndCallback(value, prop, config) {
+
+    const root = this;
+
+    // Make sure all extras have been registered when this is called.
+    root.sys.nextTick(function() {
+      root.require(config.deps || [], config.callback);
+    });
+  }
+
+  objectCopy(configHandlers, {
+    baseUrl: function(value) {
+      this.baseUrl = value;
+    },
+    urlArgs: function(value) {
+      this.urlArgs = value;
+    },
+    packages: function(pkgSpecs) {
+      pkgSpecs.forEach(function(pkgSpec) {
+        if (pkgSpec) {
+          if (isString(pkgSpec)) {
+            pkgSpec = {name: pkgSpec};
+          }
+
+          getOrCreateSimple(this, pkgSpec.name).configPackage(pkgSpec);
+        }
+      }, this);
+    },
+    paths: function(value) {
+      processObjectConfig(this, value, "configPath");
+    },
+    map: function(value) {
+      processObjectConfig(this, value, "configMap", true);
+    },
+    shim: function(value) {
+      processObjectConfig(this, value, "configShim");
+    },
+    config: function(value) {
+      processObjectConfig(this, value, "configConfig");
+    },
+    bundles: function(value) {
+      processObjectConfig(this, value, "configBundle");
+    },
+    deps: handleDepsAndCallback
+  });
+}
+
+function defaultConfigHandler(value, prop) {
+  this.__pluginsConfig[prop] = value;
+}
