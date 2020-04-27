@@ -38,6 +38,12 @@ export const MAP_SCOPE_ANY_MODULE = "*";
 export const JS_EXT = ".js";
 export const RE_JS_EXT = /\.js$/i;
 
+// Specifier Types
+export const SPEC_ABSOLUTE_URL = 1;
+export const SPEC_SIMPLE = 2;
+export const SPEC_RESOURCE = 4;
+export const SPEC_STAR = 8;
+
 // Absolute or Protocol Relative or Origin Relative
 const RE_URL_ABSOLUTE = /^\/|[\w+.\-]+:/i;
 export const RE_URL_BLOB = /^blob:/i;
@@ -126,24 +132,29 @@ export function resolveUseDefault(ns) {
   return ns && ns.__useDefault ? ns.default : ns;
 }
 
-export function assertSimple(simpleId) {
-  if (!simpleId) {
+export function assertSpecifier(id, type) {
+
+  if (!id) {
     throw createError("Invalid empty id.");
   }
 
-  if (simpleId === MAP_SCOPE_ANY_MODULE) {
-    throw createError("Invalid id '" + MAP_SCOPE_ANY_MODULE + "'.");
+  if (id === MAP_SCOPE_ANY_MODULE) {
+    if (!(type & SPEC_STAR)) {
+      throw createError("Invalid id '" + MAP_SCOPE_ANY_MODULE + "'.");
+    }
+  } else if (isAbsoluteUrl(id)) {
+    if (!(type & SPEC_ABSOLUTE_URL)) {
+      throw createError("URL not allowed: '" + id + "'.");
+    }
+  } else if (isResourceId(id)) {
+    if (!(type & SPEC_RESOURCE)) {
+      throw createError("Plugin call id not allowed: '" + id + "'.");
+    }
+  } else if (!(type & SPEC_SIMPLE)) {
+    throw createError("Simple identifier is not allowed: '" + id + "'.");
   }
 
-  if (isResourceId(simpleId)) {
-    throw createError("Plugin call id not allowed: '" + simpleId + "'.");
-  }
-
-  if (isAbsoluteUrl(simpleId)) {
-    throw createError("URL not allowed: '" + simpleId + "'.");
-  }
-
-  return simpleId;
+  return id;
 }
 
 export function absolutizeId(id, parentId) {

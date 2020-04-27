@@ -28,7 +28,8 @@ import {
 } from "../util.js";
 
 import {
-  assertSimple,
+  assertSpecifier,
+  SPEC_SIMPLE,
   createDepSetter,
   resolveUseDefault,
   removeJsExtension,
@@ -427,7 +428,7 @@ objectCopy(prototype(AbstractNode), /** @lends AbstractNode# */{
         return null;
       }
     } else if (!process.env.SYSTEM_PRODUCTION) {
-      assertSimple(simpleId);
+      assertSpecifier(simpleId, SPEC_SIMPLE);
     }
 
     let normalizedId = absolutizeId(removeJsExtension(simpleId), this.parentId);
@@ -439,7 +440,7 @@ objectCopy(prototype(AbstractNode), /** @lends AbstractNode# */{
 
       // For now, assuming map cannot return a resource identifier.
       if (!process.env.SYSTEM_PRODUCTION) {
-        assertSimple(normalizedId);
+        assertSpecifier(normalizedId, SPEC_SIMPLE);
       }
 
       // Main.
@@ -558,7 +559,7 @@ objectCopy(prototype(AbstractNode), /** @lends AbstractNode# */{
   configMap: function(mapSpec) {
 
     O.keys(mapSpec).forEach(function(aliasId) {
-      this._aliasMap[assertSimple(aliasId)] = assertSimple(mapSpec[aliasId]);
+      this._aliasMap[assertSpecifier(aliasId, SPEC_SIMPLE)] = assertSpecifier(mapSpec[aliasId], SPEC_SIMPLE);
     }, this);
   },
 

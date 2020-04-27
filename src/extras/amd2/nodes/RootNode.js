@@ -33,7 +33,10 @@ import {
 } from "../util.js";
 
 import {
-  assertSimple,
+  assertSpecifier,
+  SPEC_SIMPLE,
+  SPEC_STAR,
+  SPEC_RESOURCE,
   createRequire,
   ensureTrailingSlash,
   isBareName,
@@ -559,13 +562,17 @@ function createRootRequire(rootNode) {
 
 function initConfigHandlers() {
 
-  function getOrCreateSimple(root, id) {
-    return root.$getOrCreate(assertSimple(id));
+  const SPEC_SIMPLE_OR_STAR = SPEC_SIMPLE | SPEC_STAR;
+  const SPEC_SIMPLE_OR_RESOURCE = SPEC_SIMPLE | SPEC_RESOURCE;
+
+  function getOrCreate(root, id, specType) {
+    assertSpecifier(id, specType || SPEC_SIMPLE);
+    return id === MAP_SCOPE_ANY_MODULE ? root : root.$getOrCreate(id);
   }
 
-  function processObjectConfig(root, configById, configMethodName, allowStar) {
+  function processObjectConfig(root, configById, configMethodName, specType) {
     eachOwn(configById, function(config, id) {
-      const node = allowStar && id === MAP_SCOPE_ANY_MODULE ? root : getOrCreateSimple(root, id);
+      const node = getOrCreate(root, id, specType);
       node[configMethodName](config);
     });
   }
@@ -594,7 +601,7 @@ function initConfigHandlers() {
             pkgSpec = {name: pkgSpec};
           }
 
-          getOrCreateSimple(this, pkgSpec.name).configPackage(pkgSpec);
+          getOrCreate(this, pkgSpec.name).configPackage(pkgSpec);
         }
       }, this);
     },
@@ -602,13 +609,13 @@ function initConfigHandlers() {
       processObjectConfig(this, value, "configPath");
     },
     map: function(value) {
-      processObjectConfig(this, value, "configMap", true);
+      processObjectConfig(this, value, "configMap", SPEC_SIMPLE_OR_STAR);
     },
     shim: function(value) {
       processObjectConfig(this, value, "configShim");
     },
     config: function(value) {
-      processObjectConfig(this, value, "configConfig");
+      processObjectConfig(this, value, "configConfig", SPEC_SIMPLE_OR_RESOURCE);
     },
     bundles: function(value) {
       processObjectConfig(this, value, "configBundle");
