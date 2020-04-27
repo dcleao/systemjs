@@ -96,13 +96,14 @@ export function createRequire(node) {
       moduleName = node.normalizeDep(moduleName);
 
       return rootNode.$getOrCreateDetached(moduleName).getUrl(extension, true);
-    },
-
+    }
+    /*
     defined: function(id) {
     },
 
     specified: function(id) {
     }
+    */
   });
 
   // ---
