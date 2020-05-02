@@ -224,9 +224,11 @@ suite("SystemJS AMD2 Extra Tests", function() {
       assert.equal(typeof globalDefine, "function");
     });
 
+    /*
     test("It is the value of System.amd.define", function() {
       assert.equal(globalDefine, System.amd.define);
     });
+    */
 
     suite("amd", function() {
 

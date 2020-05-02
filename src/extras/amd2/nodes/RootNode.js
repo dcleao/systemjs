@@ -23,9 +23,7 @@ import {
   eachOwn,
   objectCopy,
   isString,
-  isFunction,
   isArray,
-  constantFun,
   stringContains,
   stringIndexOf,
   stringPrefix,
@@ -52,8 +50,7 @@ import {
 
 import AbstractNode from "./AbstractNode.js";
 import ResourceNode from "./ResourceNode.js";
-
-const REQUIRE_EXPORTS_MODULE = ["require", "exports", "module"];
+import define from "../define.js";
 
 const configHandlers = createObject();
 
@@ -124,14 +121,6 @@ export default function RootNode(systemJS) {
   this.__urlArgs = null;
 
   /**
-   * Gets the AMD `define` function of this node hierarchy.
-   *
-   * @type {function}
-   * @readonly
-   */
-  this.define = createDefine(this);
-
-  /**
    * Contains top-level plugin configurations.
    *
    * Most plugins use top-level config options only at build time,
@@ -147,6 +136,15 @@ export default function RootNode(systemJS) {
 const baseGetDescendant = prototype(AbstractNode).getDescendant;
 
 classExtend(RootNode, AbstractNode, /** @lends RootNode# */{
+
+  /**
+   * Gets the AMD `define` function of this node hierarchy.
+   */
+  define: function() {
+    // TODO: define and take...
+    return define.apply(null, arguments);
+  },
+
   /** @override */
   get isRoot() {
     return true;
@@ -464,47 +462,6 @@ classExtend(RootNode, AbstractNode, /** @lends RootNode# */{
     }
   }
 });
-
-function createDefine(rootNode) {
-
-  define.amd = {
-    // https://github.com/amdjs/amdjs-api/wiki/jQuery-and-AMD
-    jQuery: true
-  };
-
-  return define;
-
-  /**
-   * - define("id", {})
-   * - define("id", function(require, exports, module) {})
-   * - define("id", [], function() {})
-   * - define({})
-   * - define(function(require, exports, module) {})
-   * - define([], function() {})
-   */
-  function define(id, deps, execute) {
-
-    if (!isString(id)) {
-      // Anonymous define. Shift arguments right.
-      execute = deps;
-      deps = id;
-      id = null;
-    }
-
-    if (isFunction(deps)) {
-      execute = deps;
-      deps = REQUIRE_EXPORTS_MODULE;
-
-    } else if (!isArray(deps)) {
-      // deps is an object or some other value.
-      execute = constantFun(deps);
-      deps = [];
-
-    } // else, `deps` is an array and assuming but not checking that `execute` is a fun...
-
-    rootNode.sys.$queueAmd(id, deps, execute);
-  }
-}
 
 function createRootRequire(rootNode) {
 

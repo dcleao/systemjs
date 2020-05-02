@@ -225,6 +225,27 @@ export function removeUrlFragment(url) {
   return index < 0 ? url : stringPrefix(url, index);
 }
 
+/**
+ * Parses a URL annotated with a fragment containing module identifiers.
+ *
+ * URLs with module fragments can have any of the following forms
+ * (there are only three syntactic forms, but these are all of the semantic possibilities):
+ * - `module.js#!mid=module/id`
+ * - `bundle.js#!mid=bundle/id`
+ * - `plugin.js#!mid=plugin/id`
+ * - `bundle.js#!mid=bundle/id#!mid=bundled/module/id`
+ * - `bundle.js#!mid=bundle/id#!mid=plugin/id!resource/name`
+ *
+ * When the given URL does not contain `#mid=`, `null` is returned.
+ * Otherwise, returns an array with the following elements:
+ *
+ * 1. the URL without the fragment section,
+ * 2. the module identifier directly corresponding to URL (canonical or not), and
+ * 3. when present, the identifier of a sub-resource module which is bundled in the URL.
+ *
+ * @param {string} url - The URL to parse.
+ * @return {?([string, ?string, ?string])} An array having three positions or `null`.
+ */
 export function parseUrlWithModuleFragment(url) {
 
   let index = stringIndexOf(url, URL_MODULE_FRAGMENT);
@@ -235,16 +256,16 @@ export function parseUrlWithModuleFragment(url) {
   const LEN = length(URL_MODULE_FRAGMENT);
 
   const scriptUrl = stringPrefix(url, index);
-  let scriptName = stringSuffixFrom(url, index + LEN);
-  let bundledName = null;
+  let scriptId = stringSuffixFrom(url, index + LEN);
+  let bundledId = null;
 
-  index = stringIndexOf(scriptName, URL_MODULE_FRAGMENT);
+  index = stringIndexOf(scriptId, URL_MODULE_FRAGMENT);
   if (index >= 0) {
-    bundledName = stringSuffixFrom(scriptName, index + LEN);
-    scriptName = stringPrefix(scriptName, index);
+    bundledId = stringSuffixFrom(scriptId, index + LEN);
+    scriptId = stringPrefix(scriptId, index);
   }
 
-  return [scriptUrl, scriptName, bundledName];
+  return [scriptUrl, scriptId, bundledId];
 }
 
 // "/a" - origin relative

@@ -33,6 +33,8 @@
         firstNamedDefine = null;
       });
     }
+
+    // BUG HERE!!??
     return register.apply(this, arguments);
   };
 

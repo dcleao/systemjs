@@ -15,6 +15,7 @@
  */
 
 import {
+  global,
   isArray,
   classExtend,
   createError,

@@ -18,6 +18,7 @@
 
 import { global, isFunction } from "./amd2/util.js";
 import { System } from "./amd2/SystemJS.js";
+import define from "./amd2/define.js";
 import "./amd2/AmdSystemJSMixin.js";
 
 if (System.registerRegistry) {
@@ -37,7 +38,7 @@ function readAmdConfig(cfg) {
 const config = readAmdConfig(global.require) || readAmdConfig(global.requirejs);
 
 // Publish in global scope.
-global.define = rootAmdNode.define;
+global.define = define;
 global.require = global.requirejs = rootAmdNode.require;
 
 if (config) {

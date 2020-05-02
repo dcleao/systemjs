@@ -1,5 +1,4 @@
 import { systemJSPrototype, REGISTRY } from '../system-core.js';
-import { baseUrl, resolveIfNotPlainOrUrl } from '../common.js';
 import { errMsg } from '../err-msg.js';
 
 var toStringTag = typeof Symbol !== 'undefined' && Symbol.toStringTag;

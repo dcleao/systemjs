@@ -22,38 +22,27 @@ import {
   getOwn,
   hasOwn,
   objectCopy,
-  constantFun,
   length
 } from "./util.js";
 
 import {
   createDepSetter,
   isAbsoluteUrl,
+  isResourceId,
   parseUrlWithModuleFragment
 } from "./common.js";
 
 import SystemJS, { base as baseSystemJS } from "./SystemJS.js";
 
+import { takeDefine } from "./define.js";
+
 import RootNode from "./nodes/RootNode.js";
-import ResourceNode from "./nodes/ResourceNode.js";
 import AnonymousNode from "./nodes/AnonymousNode.js";
 
-/**
- * The information of an AMD `define` call.
- *
- * @typedef {({id: ?string, deps: ?Array.<string>, execute: function})} AmdInfo
- */
-
-/**
- * Queue of AMD definitions added during the load of a script file
- * and which are pending processing.
- *
- * @type {Array.<AmdInfo>}
- * @readonly
- */
-const __amdQueue = [];
-
 const EMPTY_AMD_REGISTER = constantRegister();
+
+/*jslint evil: true */
+const evalInGlobalScope = eval;
 
 /**
  * The `AmdSystemJSMixin` mixin class adds support for AMD modules to SystemJS.
@@ -111,7 +100,7 @@ objectCopy(prototype(SystemJS), /** @lends AmdSystemJSMixin# */{
      * @private
      *
      * @see AmdSystemJSMixin#getRegister
-     * @see AmdSystemJSMixin#_processRegister
+     * @see AmdSystemJSMixin#__processRegister
      */
     this.__forcedGetRegister = undefined;
   },
@@ -140,7 +129,7 @@ objectCopy(prototype(SystemJS), /** @lends AmdSystemJSMixin# */{
         throw error;
       }
 
-      // named-registry.js extra is loaded after,
+      // The `named-register.js` extra is loaded after,
       // but still, its `resolve` implementation checks the registry only
       // after the base implementation, so it's necessary to check it here.
       if (hasOwn(this.__nameRegistry, specifier)) {
@@ -251,85 +240,157 @@ objectCopy(prototype(SystemJS), /** @lends AmdSystemJSMixin# */{
 
   /** @override */
   instantiate: function(loadUrl, referralUrl) {
-    // named-registry.js extra is loaded after require.js.
-    // If `loadUrl` were a name in the name registry, the code would not reach here.
-    // If it were not a name in the name registry, resolve would have thrown.
-    // All specifiers resolved via AMD or ImportMap are URLs.
-    // => `loadUrl` must be an URL.
-    if (!process.env.SYSTEM_PRODUCTION && !isAbsoluteUrl(loadUrl)) {
-      throw createError("Invalid program.");
+    // The `named-register.js` extra is loaded after `amd2.js`.
+    // When `loadUrl` is a "name" in the "named" registry,
+    // its `instantiate` implementation immediately returns the register.
+
+    // In the odd case that some installed extra did not return an absolute URL from the `resolve` method,
+    // this implementation would not know how to handle it.
+    if (!isAbsoluteUrl(loadUrl)) {
+      return baseSystemJS.instantiate.call(this, loadUrl, referralUrl);
     }
 
-    // Is there a canonical identifier for it?
-    // This captures any #!mid=<import/canonical/id> in the URL fragment.
-    // Recovers the _originally imported module_ in the case of loadUrl being a bundle's URL.
+    const sys = this;
+    const rootNode = sys.amd;
 
-    // const [scriptUrl, scriptId, bundledId] = ...
+    // Does `loadUrl` have a module id fragment? OR ELSE
+    // Can a canonical identifier be determined for it?
     const urlParts = parseUrlWithModuleFragment(loadUrl) || [loadUrl, this._canonicalIdByUrl(loadUrl), null];
+
+    // Destructure. const [scriptUrl, scriptId, bundledId] = urlParts;
+    /**
+     * The URL of the script to load, without fragment.
+     * @type {string}
+     */
     const scriptUrl = urlParts[0];
+
+    /**
+     * The module identifier corresponding to `scriptUrl`, if any.
+     * Either present as a URL fragment annotation or the canonical identifier obtained from `_canonicalIdByUrl`.
+     * @type {?string}
+     */
     const scriptId = urlParts[1];
-    const bundledId = urlParts[2];
-    const isBundled = !!bundledId;
 
-    const importId = isBundled ? bundledId : scriptId;
-
-    let namedImportNode = importId && this.amd.$getOrCreate(importId);
-
+    /**
+     * Determined lazily, if needed.
+     * See `getScriptNode`, below.
+     * @type {?RegularNode}
+     */
     let scriptNode = null;
-    let scriptShim = null;
-    let getScriptNode = null;
 
-    if (namedImportNode) {
-      if (namedImportNode instanceof ResourceNode) {
-        // Load the plugin first.
-        return this.import(namedImportNode.plugin.id)
-          .then(this.__instantiateResource.bind(this, namedImportNode, referralUrl));
+    /**
+     * The identifier of a module which is bundled in `loadUrl`.
+     * Has to be given as a URL fragment annotation.
+     * Only defined when `scriptId` is as well.
+     * @type {?string}
+     */
+    const bundledId = urlParts[2];
+
+    /**
+     * The identifier which was used to call `System.import(importId)`
+     * (or a canonical identifier that could have been used to), if any.
+     * When an "unmapped" URL was passed to `import(.)`, then this will be `null`.
+     *
+     * This is used to get any AMD configurations.
+     * @type {?string}
+     */
+    const importId = bundledId || scriptId;
+    if (importId) {
+      // assert scriptId
+
+      // Resources are handled specially.
+      if (isResourceId(importId)) {
+        const importNode = rootNode.$getOrCreate(importId);
+
+        // Ensure the plugin is loaded first. Continue by actually loading the resource.
+        return this.import(importNode.plugin.id)
+          .then(this.__instantiateResource.bind(this, importNode, referralUrl));
       }
-      // -> It's a SimpleNode
 
-      // Check if the _script module_ has a configured shim.
-      // If so, load its dependencies, beforehand.
-      // The shims of bundled modules are ignored; these must be handled by the bundler.
-      scriptNode = isBundled ? this.amd.$getOrCreate(scriptId) : namedImportNode;
-      scriptShim = scriptNode.shim;
-      getScriptNode = constantFun(scriptNode);
-
-      if (scriptShim && scriptShim.deps) {
-        return scriptNode.requireManyAsync(scriptShim.deps)
-          .then(instantiateRegular.bind(this));
+      // Is there an AMD shim configured for the script node and
+      // does it have dependencies?
+      // If so load these first.
+      // Note that shims of bundled modules are ignored; these are handled by the bundler.
+      if (getScriptNode(false)) {
+        const scriptShim = scriptNode.shim;
+        if (scriptShim && scriptShim.deps) {
+          return scriptNode.requireManyAsync(scriptShim.deps).then(instantiateRegular);
+        }
       }
-      // -> Not shimmed.
-      // -> scriptNode !== null
     }
 
-    // Lazy getScriptNode, if really needed.
-    // If scriptNode is a named node, then it has already been determined, above.
-    // It only remains being an Anonymous node.
-    if (!getScriptNode) {
-      getScriptNode = function() {
-        return scriptNode || (scriptNode = new AnonymousNode(scriptUrl, this.amd));
-      }.bind(this);
-    }
-
-    return instantiateRegular.call(this);
+    return instantiateRegular();
 
     function instantiateRegular() {
-      return Promise.resolve(baseSystemJS.instantiate.call(this, loadUrl, referralUrl))
-        .then(this.__instantiateRegularEnd.bind(this, namedImportNode, getScriptNode, scriptShim));
+      return Promise.resolve(baseSystemJS.instantiate.call(sys, loadUrl, referralUrl))
+        .then(instantiateRegularEnd);
+    }
+
+    function instantiateRegularEnd(baseRegister) {
+
+      // Intake any queued AMD definitions.
+      // Returns an AMD register matched with the script node, if any.
+      // null -> Named AMD modules only.
+      // undefined -> no AMD modules.
+      const scriptRegisterAmd = sys.__intakeAmds(getScriptNode);
+
+      const isAmdScript = scriptRegisterAmd !== undefined;
+      if (!isAmdScript) {
+        return baseRegister;
+      }
+
+      if (!bundledId || !scriptId) {
+        // importId === scriptId
+        // When nully, SystemJS ends up throwing, as expected.
+        return scriptRegisterAmd;
+      }
+
+      // Bundling case
+      // scriptId != null
+      // bundledId != null
+      // importId === bundledId
+
+      if (scriptRegisterAmd) {
+        // The method `__intakeAmds` does not register `scriptRegisterAmd` in the named register,
+        // assuming that it is the returned register.
+        // In this case, however, it is the imported module, if any, that is returned.
+        sys.__nameRegistry[scriptNode.url] = scriptRegisterAmd;
+      }
+
+      // Has a module with id importId been defined with AMD?
+      // It should have, otherwise, SystemJS ends up throwing, as expected.
+      if (importId) {
+        const importNode = rootNode.get(importId);
+        if (importNode) {
+          return getOwn(sys.__nameRegistry, importNode.url);
+        }
+      }
+
+      // return undefined;
+    }
+
+    function getScriptNode(createIfMissing) {
+      if (!scriptNode) {
+        scriptNode = scriptId
+          ? rootNode.get(scriptId, createIfMissing) // A SimpleNode
+          : (createIfMissing ? new AnonymousNode(scriptUrl, rootNode) : null);
+      }
+
+      return scriptNode;
     }
   },
 
   /**
    * Returns the last registered SystemJS register, if any; `undefined`, otherwise.
    *
-   * Overridden to be able to return a fixed result so that classes overridding this one
+   * Overridden to be able to return a fixed result so that classes overriding this one
    * can modify a new SystemJS register which has been created by means different from those
    * of script-load and worked-load.
    *
    * @return {Array|undefined} A SystemJS register or `undefined`.
    * @override
    *
-   * @see AmdSystemJSMixin#_processRegister
+   * @see AmdSystemJSMixin#__processRegister
    */
   getRegister: function() {
 
@@ -342,93 +403,81 @@ objectCopy(prototype(SystemJS), /** @lends AmdSystemJSMixin# */{
     return baseSystemJS.getRegister.call(this);
   },
 
+  // Intakes any AMD definitions in the AMD define queue into this context.
+  $intakeDefines: function(importNode, scriptNode) {
+    this.__intakeAmds();
+  },
+
   /**
-   * Handles the end phase of instantiation.
-   *
-   * Processes any queued AMD `define` calls
+   * Intakes any queued AMD definitions
    * by creating and registering corresponding SystemJS registers.
    *
    * The first found anonymous AMD `define` call gets the URL and,
    * if defined, the identity, of the script module being loaded.
    *
-   * If the module being instantiated was imported by _bare name_,
-   * or if a canonical name exists for the imported URL,
-   * as is represented by the given `namedImportNode` argument,
-   * this module's SystemJS register is read from the named registry and returned.
-   * If it is missing, an empty SystemJS register is returned for it.
-   *
-   * Otherwise, if `namedImportNode` is `null`,
-   * the SystemJS register given in argument `baseRegister` is returned.
-   *
-   * It is expected that a script file contains either AMD _or_ SystemJS definitions, but not both.
-   *
-   * @param {?SimpleNode} namedImportNode - The simple node representing a named import; `null`, if there isn't one.
-   * @param {function() : RegularNode} getScriptNode - A function which obtains the script node being loaded.
-   * the base implementation, {@link SystemJS#instantiate}. Assuming it is defined.
-   * @param {AmdInfo} scriptShim - The shim AMD information of the script module.
-   * @param {Array} baseRegister - The SystemJS register returned by the base implementation of `instantiate`.
-   *
-   * @return {Array} A SystemJS register.
+   * @param {function(boolean) : RegularNode} getScriptNode - A function that obtains the script node being loaded.
+   * @return {Array|null|undefined} The script register, if an anonymous or AMD module was found,
+   *  or one with the identifier of `scriptNode`, was found,
+   *  or a shim AMD definition was configured;
+   *  `null`, if named AMD modules were found (but no anonymous one);
+   *  `undefined`, if no AMD modules were found (named or anonymous).
    * @private
    */
-  __instantiateRegularEnd: function(namedImportNode, getScriptNode, scriptShim, baseRegister) {
+  __intakeAmds: function(getScriptNode) {
 
-    // 0|1 <=> false|true
-    let foundScriptModule = 0;
+    let scriptRegister = null;
+    let hasAmd = false;
 
-    if (length(__amdQueue) > 0) {
-      const scriptNode = getScriptNode();
-      let amdInfo;
-      while((amdInfo = __amdQueue.shift()) !== undefined) {
-        foundScriptModule |= this.__processAmd(scriptNode, amdInfo);
+    /** @type {AmdInfo} */
+    let amdInfo;
+    while ((amdInfo = takeDefine())) {
+      hasAmd = true;
+      const register = this.__processAmd(getScriptNode(true), amdInfo);
+      if (!scriptRegister && register) {
+        scriptRegister = register;
       }
     }
 
-    // ---
-
-    // Is it a shimmed module? If so, automatically provide a definition for it.
-    if (!foundScriptModule && scriptShim) {
-      this.__processAmd(getScriptNode(), scriptShim);
+    // If no AMD script register was defined, check if there is a configured shim for it.
+    // Otherwise, ignore any configured shim.
+    if (!scriptRegister) {
+      // Is it a shimmed module? If so, automatically provide its definition.
+      const scriptNode = getScriptNode(false);
+      if (scriptNode && scriptNode.shim) {
+        hasAmd = true;
+        scriptRegister = this.__processAmd(scriptNode, scriptNode.shim);
+        // assert scriptRegister
+      }
     }
 
-    // ---
-
-    if (namedImportNode) {
-      return getOwn(this.__nameRegistry, namedImportNode.url) || EMPTY_AMD_REGISTER;
-    }
-
-    return baseRegister;
+    return scriptRegister || (hasAmd ? null : undefined);
   },
 
   __instantiateResource: function(resourceNode, referralUrl, plugin) {
 
-    // Resource already normalized.
+    // Resource already normalized?
     const resourceValuePromise = resourceNode.isNormalized
 
       // Load the normalized resource.
       ? resourceNode.loadWithPlugin(plugin, this.__amdNodeOfUrl(referralUrl))
 
-      // Now that the plugin is loaded, ask for the original resource again.
-      // The resourceNode argument represents an "alias" node for the original node.
+      // Now that the plugin is loaded, ask-for/load the original (unnormalized) resource again.
+      // The resourceNode argument is like an "alias" node for the original one.
       : this.import(resourceNode.$originalId, referralUrl);
 
     // Convert the resource value to a SystemJS register.
     return resourceValuePromise.then(constantRegister);
   },
 
-  // NOTE: Ideally, this operation would be part of SystemJS and would be overridden by extras.
   /**
    * Processes a _new_ SystemJS register.
-   *
-   * Subclasses may process the new register by either overriding
-   * the {@link AmdSystemJSMixin#getRegister} method or this method, directly.
    *
    * @param {Array} register - A SystemJS register to process.
    * @return {Array} The processed SystemJS register, possibly identical to `register`.
    *
-   * @protected
+   * @private
    */
-  _processRegister: function(register) {
+  __processRegister: function(register) {
     this.__forcedGetRegister = register;
     try {
       return this.getRegister() || register;
@@ -444,7 +493,7 @@ objectCopy(prototype(SystemJS), /** @lends AmdSystemJSMixin# */{
       return this.amd;
     }
 
-    let id = this.canonicalIdByUrl(url);
+    const id = this.canonicalIdByUrl(url);
     if (!id) {
       return new AnonymousNode(url, this.amd);
     }
@@ -453,23 +502,11 @@ objectCopy(prototype(SystemJS), /** @lends AmdSystemJSMixin# */{
   },
 
   /**
-   * Queues an AMD (module definition).
-   *
-   * @param {?string} id - The AMD identifier of the AMD (definition).
-   * @param {Array.<string>} deps - An array of AMD references of the dependencies of the AMD (definition), possibly empty.
-   * @param {function} execute - The AMD factory function.
-   * @internal
-   */
-  $queueAmd: function(id, deps, execute) {
-    __amdQueue.push({id: id, deps: deps, execute: execute});
-  },
-
-  /**
    * Processes an AMD (module definition) and registers a SystemJS register under its URL.
    *
    * @param {AbstractChildNode} scriptNode - The node of the script being loaded.
    * @param {AmdInfo} amdInfo - An AMD information object.
-   * @return {boolean} `true` if an AMD module with the given identifier or that of `loadNode` was found.
+   * @return {?Array} The register, if an anonymous AMD module, or one with the identifier of `scriptNode`, was found; `null`, otherwise.
    * @private
    */
   __processAmd: function(scriptNode, amdInfo) {
@@ -508,11 +545,16 @@ objectCopy(prototype(SystemJS), /** @lends AmdSystemJSMixin# */{
 
     // Create the register.
     // Let any other extras _transform_ it by making it go through `getRegister`.
-    // Save it in the named register. No other way to register multiple modules by URL loaded by a single URL...
-    this.__nameRegistry[url] = this._processRegister(createAmdRegister(definedNode, amdInfo));
+    const register = this.__processRegister(createAmdRegister(definedNode, amdInfo));
 
-    // Was it anonymous or the named, loaded script?
-    return !isNamedDefinition || (definedNode.id === scriptNode.id);
+    // Save it in the named register. No other way to register multiple modules by URL loaded by a single URL.
+    // Save even if it is the script register, because if this is the bundle, this will not be the result of instantiate.
+    this.__nameRegistry[url] = register;
+
+    // Was it anonymous or a named script with the same id?
+    const isScriptRegister = !isNamedDefinition || (definedNode.id === scriptNode.id);
+
+    return isScriptRegister ? register : null;
   },
 
   get __nameRegistry() {
@@ -527,7 +569,11 @@ objectCopy(prototype(SystemJS), /** @lends AmdSystemJSMixin# */{
 
   nextTick: typeof setTimeout !== "undefined" ? function (fn) { setTimeout(fn, 4); } :
             typeof process !== "undefined" ? process.nextTick :
-            function (fn) { fn(); }
+            function (fn) { fn(); },
+
+  evaluate: function(text) {
+    return evalInGlobalScope(text);
+  }
 });
 
 function constantRegister(value) {

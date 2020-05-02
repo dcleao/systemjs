@@ -6,11 +6,6 @@ import { systemJSPrototype } from '../system-core';
 import { hasDocument, baseUrl, resolveUrl } from '../common';
 import { errMsg } from '../err-msg.js';
 
-var systemRegister = systemJSPrototype.register;
-systemJSPrototype.register = function (deps, declare) {
-  systemRegister.call(this, deps, declare);
-};
-
 systemJSPrototype.createScript = function (url) {
   var script = document.createElement('script');
   script.charset = 'utf-8';
