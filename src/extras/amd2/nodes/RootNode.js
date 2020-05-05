@@ -16,6 +16,7 @@
 
 import {
   prototype,
+  constantFun,
   classExtend,
   createError,
   createObject,
@@ -138,11 +139,24 @@ const baseGetDescendant = prototype(AbstractNode).getDescendant;
 classExtend(RootNode, AbstractNode, /** @lends RootNode# */{
 
   /**
-   * Gets the AMD `define` function of this node hierarchy.
+   * Defines a module with a given identifier and optional dependencies and definition.
+   *
+   * This function supports the following signatures:
+   *
+   * 1. `define("id", function factory(require, exports, module) { })`
+   * 2. `define("id", [deps...], function factory() { })`
+   * 3. `define("id", exported-value)`
+   *
+   * @param {string} id - The module identifier.
+   * @param {Array} deps - An array of dependency specifiers.
+   * @param {function} factory - The module's factory function.
+   *
+   * @return {RootNode} This instance.
    */
-  define: function() {
-    // TODO: define and take...
-    return define.apply(null, arguments);
+  define: function(id, deps, factory) {
+    define.apply(null, arguments);
+    this.sys.__intakeAmds(constantFun(null));
+    return this;
   },
 
   /** @override */

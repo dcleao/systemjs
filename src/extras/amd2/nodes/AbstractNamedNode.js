@@ -95,6 +95,10 @@ classExtend(AbstractNamedNode, AbstractChildNode, /** @lends AbstractNamedNode# 
     return this.__config;
   },
 
+  set config(value) {
+    this.__config = value || null;
+  },
+
   /**
    * Gets or sets this modules's bundle module.
    *

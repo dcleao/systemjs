@@ -17,12 +17,13 @@
 // Portions of the following code are based on https://github.com/requirejs/requirejs.
 
 import {
-  prototype,
+  constantFun,
   createError,
   getOwn,
   hasOwn,
+  length,
   objectCopy,
-  length
+  prototype
 } from "./util.js";
 
 import {
@@ -41,7 +42,6 @@ import AnonymousNode from "./nodes/AnonymousNode.js";
 
 const EMPTY_AMD_REGISTER = constantRegister();
 
-/*jslint evil: true */
 const evalInGlobalScope = eval;
 
 /**
@@ -380,6 +380,142 @@ objectCopy(prototype(SystemJS), /** @lends AmdSystemJSMixin# */{
     }
   },
 
+  __instantiateResource: function(resourceNode, referralUrl, plugin) {
+
+    if (resourceNode.isNormalized) {
+      return this.__instantiateResourceNormalized(resourceNode, referralUrl, plugin);
+    }
+
+    // Now that the plugin is loaded, ask-for/load the original (unnormalized) resource again.
+    // The resourceNode argument is like an "alias" node for the original one.
+    // Convert the resource value to a SystemJS register.
+    return this.import(resourceNode.$originalId, referralUrl).then(constantRegister);
+  },
+
+  __instantiateResourceNormalized: function(resourceNode, referralUrl, plugin) {
+
+    const sys = this;
+    const referralNode = sys.__amdNodeOfUrl(referralUrl);
+    const rootNode = resourceNode.root;
+
+    return new Promise(function(resolve, reject) {
+
+      const onLoadCallback = createOnloadCallback(resolve, reject);
+
+      plugin.load(resourceNode.resourceName, referralNode.require, onLoadCallback, rootNode.__pluginsConfig);
+    });
+
+    // ---
+
+    function createOnloadCallback(resolve, reject) {
+
+      function onLoadCallback(value) {
+        resolve(constantRegister(value));
+      }
+
+      onLoadCallback.createError = reject;
+
+      /**
+       * Finishes loading by loading the given source code, as if it were from a script module,
+       * whose anonymous module, if any, gets associated with the identifier `this.resourceName`.
+       *
+       * The resource module finishes loading by exporting the same value as that module.
+       *
+       * The module "inherits" the configuration of the resource node.
+       *
+       * @param {string} text - The source code.
+       * @param {?string} [textAlt] - The alternative argument for source code,
+       * provided for backwards compatibility. When specified, takes precedence over the `text` argument.
+       */
+      onLoadCallback.fromText = function(text, textAlt) {
+
+        if (textAlt) {
+          text = textAlt;
+        }
+
+        // 1. Copy config from id to resourceName, if any.
+        // Generally, it is node guaranteed that this node will have a mapped URL...
+        // For RequireJS/AMD this isn't a problem, but for this implementation,
+        // it is assumed that every named node has a URL to be placed in the named registry.
+        // This also seems to be a problem for ad hoc, virtually defined AMD modules no?
+        const directResourceNode = rootNode.$getOrCreate(resourceNode.resourceName);
+        if (resourceNode.config) {
+          directResourceNode.config = resourceNode.config;
+        }
+
+        try {
+          // 2. May call the global `define` one or more times.
+          sys.evaluate(text);
+
+          // 3. Intake defines into this hierarchy, and
+          // 4. Register the script register in the named registry.
+          // The method `__intakeAmds` does not register `scriptRegisterAmd` in the named register,
+          // assuming that it is the "returned" register.
+          // However, it is the register of resourceNode which is "returned".
+
+          const register = sys.__intakeAmds(constantFun(directResourceNode)) || EMPTY_AMD_REGISTER;
+
+          // Note, directResourceNode.url gets defined only within the above __intakeAmds call.
+          const url = directResourceNode.url;
+
+          sys.__nameRegistry[url] = register;
+
+          // 5. Call onLoadCallback with the value of resourceName.
+          sys.import(directResourceNode.id, referralUrl).then(onLoadCallback);
+        } catch (ex) {
+          reject(ex);
+        }
+      };
+
+      return onLoadCallback;
+    }
+  },
+
+  /**
+   * Intakes any queued AMD definitions
+   * by creating and registering corresponding SystemJS registers.
+   *
+   * The first found anonymous AMD `define` call gets the URL and,
+   * if defined, the identity, of the script module being loaded.
+   *
+   * @param {function(boolean) : ?RegularNode} getScriptNode - A function that obtains the script node being loaded, if any.
+   * @return {Array|null|undefined} The script register, if an anonymous or AMD module was found,
+   *  or one with the identifier of `scriptNode`, was found,
+   *  or a shim AMD definition was configured;
+   *  `null`, if named AMD modules were found (but no anonymous one);
+   *  `undefined`, if no AMD modules were found (named or anonymous).
+   * @private
+   */
+  __intakeAmds: function(getScriptNode) {
+
+    let scriptRegister = null;
+    let hasAmd = false;
+
+    /** @type {AmdInfo} */
+    let amdInfo;
+    while ((amdInfo = takeDefine())) {
+      hasAmd = true;
+      const register = this.__processAmd(amdInfo, getScriptNode(true));
+      if (!scriptRegister && register) {
+        scriptRegister = register;
+      }
+    }
+
+    // If no AMD script register was defined, check if there is a configured shim for it.
+    // Otherwise, ignore any configured shim.
+    if (!scriptRegister) {
+      // Is it a shimmed module? If so, automatically provide its definition.
+      const scriptNode = getScriptNode(false);
+      if (scriptNode && scriptNode.shim) {
+        hasAmd = true;
+        scriptRegister = this.__processAmd(scriptNode.shim, scriptNode);
+        // assert scriptRegister
+      }
+    }
+
+    return scriptRegister || (hasAmd ? null : undefined);
+  },
+
   /**
    * Returns the last registered SystemJS register, if any; `undefined`, otherwise.
    *
@@ -401,72 +537,6 @@ objectCopy(prototype(SystemJS), /** @lends AmdSystemJSMixin# */{
     }
 
     return baseSystemJS.getRegister.call(this);
-  },
-
-  // Intakes any AMD definitions in the AMD define queue into this context.
-  $intakeDefines: function(importNode, scriptNode) {
-    this.__intakeAmds();
-  },
-
-  /**
-   * Intakes any queued AMD definitions
-   * by creating and registering corresponding SystemJS registers.
-   *
-   * The first found anonymous AMD `define` call gets the URL and,
-   * if defined, the identity, of the script module being loaded.
-   *
-   * @param {function(boolean) : RegularNode} getScriptNode - A function that obtains the script node being loaded.
-   * @return {Array|null|undefined} The script register, if an anonymous or AMD module was found,
-   *  or one with the identifier of `scriptNode`, was found,
-   *  or a shim AMD definition was configured;
-   *  `null`, if named AMD modules were found (but no anonymous one);
-   *  `undefined`, if no AMD modules were found (named or anonymous).
-   * @private
-   */
-  __intakeAmds: function(getScriptNode) {
-
-    let scriptRegister = null;
-    let hasAmd = false;
-
-    /** @type {AmdInfo} */
-    let amdInfo;
-    while ((amdInfo = takeDefine())) {
-      hasAmd = true;
-      const register = this.__processAmd(getScriptNode(true), amdInfo);
-      if (!scriptRegister && register) {
-        scriptRegister = register;
-      }
-    }
-
-    // If no AMD script register was defined, check if there is a configured shim for it.
-    // Otherwise, ignore any configured shim.
-    if (!scriptRegister) {
-      // Is it a shimmed module? If so, automatically provide its definition.
-      const scriptNode = getScriptNode(false);
-      if (scriptNode && scriptNode.shim) {
-        hasAmd = true;
-        scriptRegister = this.__processAmd(scriptNode, scriptNode.shim);
-        // assert scriptRegister
-      }
-    }
-
-    return scriptRegister || (hasAmd ? null : undefined);
-  },
-
-  __instantiateResource: function(resourceNode, referralUrl, plugin) {
-
-    // Resource already normalized?
-    const resourceValuePromise = resourceNode.isNormalized
-
-      // Load the normalized resource.
-      ? resourceNode.loadWithPlugin(plugin, this.__amdNodeOfUrl(referralUrl))
-
-      // Now that the plugin is loaded, ask-for/load the original (unnormalized) resource again.
-      // The resourceNode argument is like an "alias" node for the original one.
-      : this.import(resourceNode.$originalId, referralUrl);
-
-    // Convert the resource value to a SystemJS register.
-    return resourceValuePromise.then(constantRegister);
   },
 
   /**
@@ -504,12 +574,14 @@ objectCopy(prototype(SystemJS), /** @lends AmdSystemJSMixin# */{
   /**
    * Processes an AMD (module definition) and registers a SystemJS register under its URL.
    *
-   * @param {AbstractChildNode} scriptNode - The node of the script being loaded.
    * @param {AmdInfo} amdInfo - An AMD information object.
-   * @return {?Array} The register, if an anonymous AMD module, or one with the identifier of `scriptNode`, was found; `null`, otherwise.
+   * @param {?AbstractChildNode} scriptNode - The node of the script being loaded, if any;
+   * `null` if there is no script being loaded, in which case, `amdInfo` must have a defined identifier.
+   * @return {Array|undefined} The register, if an anonymous AMD module, or one with the identifier of `scriptNode`, when defined, was found;
+   * `undefined`, otherwise.
    * @private
    */
-  __processAmd: function(scriptNode, amdInfo) {
+  __processAmd: function(amdInfo, scriptNode) {
 
     const isNamedDefinition = !!amdInfo.id;
 
@@ -521,40 +593,47 @@ objectCopy(prototype(SystemJS), /** @lends AmdSystemJSMixin# */{
       ? this.amd.$getOrCreate(this.amd.$normalizeDefined(amdInfo.id))
       : scriptNode;
 
-    const url = definedNode.url;
-
     if (!process.env.SYSTEM_PRODUCTION) {
+      if (!definedNode) {
+        throw createError("Anonymous define requires a contextual script node.");
+      }
+
       // Both of the following cases are the result of misconfiguration and are thus not supported:
       // - If the node has no defined bundle, `scriptNode` could be it.
       // - If the node has no defined fixedPath, `scriptNode.url` could be it.
-      if (isNamedDefinition && definedNode !== scriptNode && definedNode.bundle !== scriptNode) {
+      if (isNamedDefinition && scriptNode && definedNode !== scriptNode && definedNode.bundle !== scriptNode) {
         throw createError("AMD named define for a module without a configured path or bundle.");
-      }
-
-      if (url === null) {
-        throw createError("Invalid state");
       }
     }
 
+    let url = definedNode.url;
+    if (!url) {
+      // Assign a virtual module URL: `import:id`;
+      definedNode.fixedPath = "import:" + definedNode.id;
+      url = definedNode.url;
+    }
+
     // TODO: Valid way to test if a module has already been defined?
-    // Through the API, node.require can ask for module even if the module has not been loaded.
+    // Through the API, Node#require can ask for "module" dependency even if the module has not been loaded...
     if (definedNode.amdModule) {
       this.$warn("Module '" + (definedNode.id || url) + "' is already defined. Ignoring.");
-      return false;
+      return;
     }
 
     // Create the register.
     // Let any other extras _transform_ it by making it go through `getRegister`.
     const register = this.__processRegister(createAmdRegister(definedNode, amdInfo));
 
-    // Save it in the named register. No other way to register multiple modules by URL loaded by a single URL.
-    // Save even if it is the script register, because if this is the bundle, this will not be the result of instantiate.
+    // Was it anonymous or a named script with the same id as the script being loaded?
+    const isScriptRegister = !!scriptNode && (!isNamedDefinition || definedNode.id === scriptNode.id);
+    if (isScriptRegister) {
+      // Assume to be the return value of `instantiate` and don't register in the named registry.
+      return register;
+    }
+
+    // Register it in the named register.
+    // No other way to register multiple modules by URL loaded by a single URL.
     this.__nameRegistry[url] = register;
-
-    // Was it anonymous or a named script with the same id?
-    const isScriptRegister = !isNamedDefinition || (definedNode.id === scriptNode.id);
-
-    return isScriptRegister ? register : null;
   },
 
   get __nameRegistry() {

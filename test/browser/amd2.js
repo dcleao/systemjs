@@ -243,6 +243,23 @@ suite("SystemJS AMD2 Extra Tests", function() {
     });
   });
 
+  suite("RootNode.define(id, ...)", function() {
+
+    test("Can define a virtual module", function() {
+
+      const systemJS = createSystemJS();
+      const exportedValue = {};
+
+      systemJS.amd.define("abc", function() {
+        return exportedValue;
+      });
+
+      return systemJS.import("abc").then(function(value) {
+        assert.equal(value, exportedValue);
+      });
+    });
+  });
+
   suite("Global require function", function() {
 
     const globalRequire = typeof require !== "undefined" ? require : undefined;
@@ -499,6 +516,15 @@ suite("SystemJS AMD2 Extra Tests", function() {
             return systemJS.import("fixtures/pluginA!a-resource").then(function(value2) {
               assert.ok(value1 === value2);
             });
+          });
+        });
+
+        test("Can load a resource from text", function() {
+
+          const systemJS = setupBasicSystemJS();
+
+          return systemJS.import("fixtures/plugin-load-from-text!c-resource").then(function(value) {
+            assert.equal(value, "Resource name is: 'c-resource'.");
           });
         });
       });

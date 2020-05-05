@@ -142,44 +142,5 @@ classExtend(ResourceNode, AbstractNamedNode, /** @lends ResourceNode# */{
     // - unbundled: plugin.js#!mid=plugin/id!resource/name
     // - bundled:   bundle.js#!mid=bundle/id#!mid=plugin/id!resource/name
     return buildResourceId(this.plugin.getUrl(extension, omitFragment), this.resourceName);
-  },
-
-  loadWithPlugin: function(pluginInstance, referralNode) {
-
-    if (!process.env.SYSTEM_PRODUCTION && !this.isNormalized) {
-      throw createError("Invalid operation.");
-    }
-
-    const resourceNode = this;
-    const config = this.root.__pluginsConfig;
-
-    return new Promise(function(resolve, reject) {
-
-      const onLoadCallback = createOnloadCallback(resolve, reject);
-
-      pluginInstance.load(resourceNode.resourceName, referralNode.require, onLoadCallback, config);
-    });
-
-    // ---
-
-    function createOnloadCallback(resolve, reject) {
-
-      function onLoadCallback(value) {
-        resolve(value);
-      }
-
-      onLoadCallback.createError = reject;
-
-      onLoadCallback.fromText = function(text, textAlt) {
-        if (textAlt) {
-          text = textAlt;
-        }
-
-        // eval
-        // define is called..
-      };
-
-      return onLoadCallback;
-    }
   }
 });
