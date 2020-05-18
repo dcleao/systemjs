@@ -152,7 +152,7 @@ classExtend(AbstractNamedNode, AbstractChildNode, /** @lends AbstractNamedNode# 
     if (bundle) {
       // bundle.js#!mid=bundle/id#!mid=bundled/module/id
       // bundle.js#!mid=bundle/id#!mid=plugin/id!resource/name
-      return bundle.getUrl(extension, omitFragment) + URL_MODULE_FRAGMENT + this.leafId;
+      return bundle.getUrl(extension, omitFragment) + URL_MODULE_FRAGMENT + this.id;
     }
 
     return this._getUnbundledUrl(extension, omitFragment);

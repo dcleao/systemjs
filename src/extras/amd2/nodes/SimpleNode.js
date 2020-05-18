@@ -85,11 +85,6 @@ export default function SimpleNode(name/*, parent, isDetached*/) {
 const baseNamedNodeInvalidateUrl = prototype(AbstractNamedNode)._invalidateRegularUrl;
 
 classExtend(SimpleNode, AbstractNamedNode, /** @lends SimpleNode# */{
-  /** @override */
-  get leafId() {
-    return this.id + JS_EXT;
-  },
-
   /**
    * Gets the main module of this module.
    *
@@ -262,7 +257,7 @@ classExtend(SimpleNode, AbstractNamedNode, /** @lends SimpleNode# */{
         // module.js#!mid=module/id
         // bundle.js#!mid=bundle/id
         // plugin.js#!mid=plugin/id
-        url += URL_MODULE_FRAGMENT + this.leafId;
+        url += URL_MODULE_FRAGMENT + this.id;
       }
     }
 

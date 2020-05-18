@@ -323,26 +323,24 @@ suite("SystemJS AMD2 Extra Tests", function() {
 
         const testCase = testNormalizeDep.bind(null, setupBasicSystemJS);
 
-        testCase("fixtures/anonymous", "fixtures/anonymous.js");
+        testCase("fixtures/anonymous", "fixtures/anonymous");
         testCase("fixtures/anonymous.js", "fixtures/anonymous.js");
-        testCase("fixtures/bundleA", "fixtures/bundleA.js");
-        testCase("fixtures/pluginA", "fixtures/pluginA.js");
-        testCase("fixtures/plugin-unloaded.js!foo", "fixtures/plugin-unloaded.js!foo_unnormalized");
+        testCase("fixtures/plugin-unloaded!foo", "fixtures/plugin-unloaded!foo_unnormalized");
       });
 
       suite("global alias", function() {
 
         const testCase = testNormalizeDep.bind(null, setupGlobalAliasSystemJS);
 
-        testCase("fixtures-global-alias", "fixtures.js");
-        testCase("fixtures-global-alias/anonymous", "fixtures/anonymous.js");
+        testCase("fixtures-global-alias", "fixtures");
+        testCase("fixtures-global-alias/anonymous", "fixtures/anonymous");
       });
 
       suite("loaded plugin", function() {
 
         const testCase = testNormalizeDep.bind(null, setupPluginLoadedSystemJS);
 
-        testCase("fixtures/plugin-loaded!foo", "fixtures/plugin-loaded.js!foo");
+        testCase("fixtures/plugin-loaded!foo", "fixtures/plugin-loaded!foo");
       });
 
       suite("relative", function() {
@@ -358,7 +356,7 @@ suite("SystemJS AMD2 Extra Tests", function() {
           });
         }
 
-        testRelative("./Model", "fixtures/Model.js");
+        testRelative("./Model", "fixtures/Model");
         testRelative("./Model.js", "fixtures/Model.js");
       });
     });
@@ -367,33 +365,32 @@ suite("SystemJS AMD2 Extra Tests", function() {
 
       const testCase = testResolve.bind(null, setupBasicSystemJS);
 
-      testCase("fixtures/anonymous.js", FIXTURES_URL + "anonymous.js#!mid=fixtures/anonymous.js");
-      testCase("fixtures/anonymous", FIXTURES_URL + "anonymous.js#!mid=fixtures/anonymous.js");
-      testCase("fixtures/module-dep", FIXTURES_URL + "module-dep.js#!mid=fixtures/module-dep.js");
-      testCase("fixtures/plugin-unloaded!foo", FIXTURES_URL + "plugin-unloaded.js#!mid=fixtures/plugin-unloaded.js!foo_unnormalized");
+      testCase("fixtures/anonymous.js", FIXTURES_URL + "anonymous.js.js#!mid=fixtures/anonymous.js");
+      testCase("fixtures/anonymous", FIXTURES_URL + "anonymous.js#!mid=fixtures/anonymous");
+      testCase("fixtures/module-dep", FIXTURES_URL + "module-dep.js#!mid=fixtures/module-dep");
+      testCase("fixtures/plugin-unloaded!foo", FIXTURES_URL + "plugin-unloaded.js#!mid=fixtures/plugin-unloaded!foo_unnormalized");
     });
 
     suite("global alias", function() {
 
       const testCase = testResolve.bind(null, setupGlobalAliasSystemJS);
 
-      testCase("fixtures-global-alias/anonymous", FIXTURES_URL + "anonymous.js#!mid=fixtures/anonymous.js");
+      testCase("fixtures-global-alias/anonymous", FIXTURES_URL + "anonymous.js#!mid=fixtures/anonymous");
     });
 
     suite("loaded plugin", function() {
 
       const testCase = testResolve.bind(null, setupPluginLoadedSystemJS);
 
-      testCase("fixtures/plugin-loaded.js!foo", FIXTURES_URL + "plugin-loaded.js#!mid=fixtures/plugin-loaded.js!foo");
-      testCase("fixtures/plugin-loaded!foo", FIXTURES_URL + "plugin-loaded.js#!mid=fixtures/plugin-loaded.js!foo");
-      testCase("fixtures/plugin-loaded!foo.js", FIXTURES_URL + "plugin-loaded.js#!mid=fixtures/plugin-loaded.js!foo");
+      testCase("fixtures/plugin-loaded!foo", FIXTURES_URL + "plugin-loaded.js#!mid=fixtures/plugin-loaded!foo");
+      testCase("fixtures/plugin-loaded!foo.js", FIXTURES_URL + "plugin-loaded.js#!mid=fixtures/plugin-loaded!foo.js");
     });
 
     suite("bundle", function() {
 
       const testCase = testResolve.bind(null, setupBundleSystemJS);
 
-      testCase("bundleA-bundled-module1", FIXTURES_URL + "bundleA.js#!mid=fixtures/bundleA.js#!mid=bundleA-bundled-module1.js");
+      testCase("bundleA-bundled-module1", FIXTURES_URL + "bundleA.js#!mid=fixtures/bundleA#!mid=bundleA-bundled-module1");
     });
   });
 
@@ -463,7 +460,7 @@ suite("SystemJS AMD2 Extra Tests", function() {
             assert.equal(value.name, "dependency-resource");
 
             const resource = value.resource;
-            assert.equal(resource.plugin, "fixtures/pluginA.js");
+            assert.equal(resource.plugin, "fixtures/pluginA");
             assert.equal(resource.resource, "foobar");
           });
         });
@@ -489,7 +486,7 @@ suite("SystemJS AMD2 Extra Tests", function() {
 
           return systemJS.import("fixtures/pluginA!a-resource").then(function(value) {
             assert.ok(value instanceof Object);
-            assert.equal(value.plugin, "fixtures/pluginA.js");
+            assert.equal(value.plugin, "fixtures/pluginA");
             assert.equal(value.resource, "a-resource");
           });
         });
@@ -500,7 +497,7 @@ suite("SystemJS AMD2 Extra Tests", function() {
 
           return systemJS.import("fixtures/pluginA!b-resource").then(function(value) {
             assert.ok(value instanceof Object);
-            assert.equal(value.plugin, "fixtures/pluginA.js");
+            assert.equal(value.plugin, "fixtures/pluginA");
             assert.equal(value.resource, "b-resource");
           });
         });
@@ -548,7 +545,7 @@ suite("SystemJS AMD2 Extra Tests", function() {
         return systemJS.import("bundleA-bundled-module1").then(function(value) {
           assert.ok(value instanceof Object);
           assert.equal(value.name, "bundleA-bundled-module1");
-          assert.equal(value.id, "bundleA-bundled-module1.js");
+          assert.equal(value.id, "bundleA-bundled-module1");
         });
       });
     });
@@ -576,7 +573,7 @@ suite("SystemJS AMD2 Extra Tests", function() {
 
       const testCase = testCanonicalId.bind(null, setupBasicSystemJS);
 
-      testCase(FIXTURES_URL + "anonymous.js", "fixtures/anonymous.js");
+      testCase(FIXTURES_URL + "anonymous.js", "fixtures/anonymous");
     });
 
     suite("unmapped", function() {
@@ -593,6 +590,7 @@ suite("SystemJS AMD2 Extra Tests", function() {
 
       testCase("foo#!mid=a/b/c", "a/b/c");
       testCase("foo.js#!mid=a/b/c", "a/b/c");
+      testCase(FIXTURES_URL + "bundleA.js#!mid=fixtures/bundleA#!mid=bundleA-bundled-module1", "bundleA-bundled-module1");
       testCase(FIXTURES_URL + "bundleA.js#!mid=fixtures/bundleA#!mid=bundleA-bundled-module1.js", "bundleA-bundled-module1.js");
     });
   });

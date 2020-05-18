@@ -24,7 +24,6 @@ import {
   parseResourceId,
   buildResourceId,
   RE_RESOURCE_ID_UNNORMALIZED,
-  RE_JS_EXT
 } from "../common.js";
 
 import AbstractNamedNode from "./AbstractNamedNode.js";
@@ -65,10 +64,6 @@ export default function ResourceNode(name, parent, isDetached) {
     if (!resourceIdParts) {
       throw createError("Invalid argument 'name'.");
     }
-
-    if (!RE_JS_EXT.test(resourceIdParts[0])) {
-      throw createError("Argument 'name' is not normalized.");
-    }
   }
 
   /**
@@ -84,12 +79,6 @@ export default function ResourceNode(name, parent, isDetached) {
 }
 
 classExtend(ResourceNode, AbstractNamedNode, /** @lends ResourceNode# */{
-
-  // id is already a leaf id.
-  /** @override */
-  get leafId() {
-    return this.id;
-  },
 
   /** @override */
   get isNormalized() {

@@ -43,7 +43,6 @@ import {
   removeJsExtension,
   removeUrlFragment,
   MAP_SCOPE_ANY_MODULE,
-  JS_EXT,
   RE_URL_BLOB,
   RE_URL_DATA_OR_BLOB,
   PATH_SEPARATOR
@@ -233,15 +232,13 @@ classExtend(RootNode, AbstractNode, /** @lends RootNode# */{
 
   /** @override */
   getDescendant: function(normalizedId, createIfMissing, createDetached) {
-    // Resources always use the .js extension on their plugin prefix.
-    const isResource = isResourceId(normalizedId);
-    const neutralId = isResource ? normalizedId : removeJsExtension(normalizedId);
 
-    let node = getOwn(this.__byId, neutralId) || null;
+    const isResource = isResourceId(normalizedId);
+    let node = getOwn(this.__byId, normalizedId) || null;
     if (!node && createIfMissing) {
       // Resources are children of root.
       if (isResource) {
-        node = new ResourceNode(neutralId, this, createDetached);
+        node = new ResourceNode(normalizedId, this, createDetached);
       } else {
         node = baseGetDescendant.apply(this, arguments);
       }
@@ -354,7 +351,7 @@ classExtend(RootNode, AbstractNode, /** @lends RootNode# */{
       if (urlPrevious !== url) {
         const node = getOwn(this.__byUrl, url);
         if (node) {
-          return node.id + idSuffix + JS_EXT;
+          return node.id + idSuffix;
         }
 
         urlPrevious = url;

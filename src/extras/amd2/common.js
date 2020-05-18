@@ -38,6 +38,9 @@ export const MAP_SCOPE_ANY_MODULE = "*";
 export const JS_EXT = ".js";
 export const RE_JS_EXT = /\.js$/i;
 
+// See AbstractNode#$getDependency
+export const RE_AMD_ID_PREFIX = /^amd:/;
+
 // Specifier Types
 export const SPEC_ABSOLUTE_URL = 1;
 export const SPEC_SIMPLE = 2;

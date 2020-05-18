@@ -1,39 +1,153 @@
 # AMD2 Extra
 
-This SystemJS extra implements a mostly complete [AMD](https://github.com/amdjs/amdjs-api) implementation, 
-especially, in its [RequireJS](https://requirejs.org) flavour,
-and from the point of view of AMD modules, loader plugins and configuration. 
+This SystemJS extra implements a mostly complete [AMD](https://github.com/amdjs/amdjs-api) implementation.
+For what is unspecified, and for some additional features, it follows the implementation of 
+the [RequireJS](https://requirejs.org) library.
 
-See [Unsupported Features](#unsupported-features), for more information.
+Some AMD features are purposely not supported in favor of better interoperability with SystemJS, 
+[Import Maps](https://github.com/WICG/import-maps) and ES6 modules. 
 
-## Code naming scheme
+[Unsupported Features](#unsupported-features)
 
-Properties naming scheme to support indicating class accessibility and mangling.
+## Module specifiers
 
-- `public` - public
-- `_protected` - protected
-- `__private` - private; mangled
-- `$internal` - internal; mangled
+Ideally, any SystemJS module should be able to depend on any other module made available to SystemJS, whatever its
+module system or named module registry.  
 
-Can be minified using, for example:
-```bash
-terser require.js
-   --mangle keep_fnames='/Node$/'
-   --mangle-props regex='/^(__|[$])(?!useDefault)/'
-```
+Additionally, for true isolation, SystemJS modules should not be aware of the module system of their dependencies
+and, as such, should refer to other modules using the module specifier rules of their own module system. 
+
+As such, an AMD module should use AMD specifiers for referring to any other SystemJS modules,
+and, conversely, ES6 modules should use ES6 and Import Maps specifier rules to refer to any other SystemJS modules.
+
+Unfortunately, achieving this is not generally possible.
+
+To give an example, if an AMD module depends on another module, `a/b`, should this refer to the 
+Import Maps specifier `a/b` or `a/b.js`? Both would have to be tested for, because, unlike AMD, 
+Import Maps does have the concept of a default extension (AMD has a default extension of `js`).
+While possibly hard to implement, this could be achieved.
+
+Another example is if an AMD module depends on a module `a/b.js`. By AMD rules, this would identify an URL which
+does not use
+Now imagine an opposite scenario, of an ES6 module depending on another module, `a/b`.
+For this to match an AMD module, it would need to either be configured as a package or denote the `a/b.js`.
 
 ## Unsupported Features
 
-Some AMD/RequireJS features are not supported so that interoperability is possible
-with [Import Maps](https://github.com/WICG/import-maps) and ES6 modules.
-Most importantly, AMD considers module specifiers ending in `.js` to be URLs
-and, as such, does not apply `map`, `paths` or `baseUrl` configurations to it.
-Moreover, if these URLs start with a bare segment, these are considered document relative.
-By contrast, import maps consider these specifiers to be bare module names and 
-applies import maps to these.
-Conversely, AMD always adds a `js` extension to module identifiers, 
-and so these never include the `js` extension *a priori*.
-On the contrary, import maps require extensions to be specified.
+This implementation specifically breaks with some AMD/RequireJS features so that it becomes interoperable with 
+ES6 modules and .
+
+First, let's look at how each of the systems, AMD and import-maps, deals with various kinds of **module specifiers**. 
+A module specifier is what is used to *specify* a module.
+
+In ES6, module specifiers are the arguments of the `import from "specifier"` statements and the `import("specifier")` pseudo-function.
+In ES6, these arguments are always taken as URLs, and, crucially, URLs which start as a *bare name* are not allowed (e.g. `"my/module.js"`).
+
+The import-maps specification extends ES6 module specifiers to include *bare names* which are converted to URLs via an import map. 
+An import map is a set of mappings where each maps a *base* module specifier to a *base* URL.
+In the import-maps specification, *names* are always absolute — there is no way to indicate a relative name.
+Please note that the import maps specification allows mapping both names or URLs to other URLs.
+  
+In AMD, module specifiers are arguments of the `require([...deps], ...)` functions and arguments of the `define(id, [...deps], .)` function. 
+These can either be *identifiers* or URLs. An AMD module identifier is equivalent to an import-maps' *name*.
+So, to simplify the description, will refer to AMD identifiers also as *names*.
+Converting an AMD module name to an URL is achieved via a set of AMD configurations: `map`, `paths`, `bundles` and `baseUrl`.
+Unlike with import-maps, these "mapping" configurations do not apply to URL specifiers.
+
+Another notable difference is that AMD names can be relative, 
+but only when specified as the dependency (the `deps` arguments) of a *named module*.
+The first argument of the `define(name, ...)` function is always an absolute (and normalized) name.
+
+The following table shows specifiers having different traits and the type of specifier these are taken to be 
+— Name or URL — by the AMD and import-maps systems. 
+
+| **Specifier Trait**                      | **Examples**                                 | **AMD**                          | **Import Maps**                   |
+|------------------------------------------|----------------------------------------------|----------------------------------|-----------------------------------|
+| Protocol-prefixed                        | `http://foo`<br>`git+ssh://foo`<br>`urn:foo` | URL                              | URL                               |
+| Protocol-relative                        | `//foo`                                      | URL                              | URL                               |
+| Host-relative                            | `/foo`                                       | URL                              | URL                               |
+| Name-prefixed<br>without `js` extension  | `foo/bar`                                    | Name<br>(absolute)               | Name                              |
+| Name-prefixed<br>with `js` extension     | `foo/bar.js`                                 | ***URL***<br>(document-relative) | ***Name***                        |
+| Directory-relative                       | `./foo`                                      | ***Name***<br>(relative \*)      | ***URL***<br>(document-relative)  |
+| Parent-directory-relative                | `../foo`                                     | ***Name***<br>(relative \*\*)    | ***URL***<br>(document-relative)  |
+
+(\*) as a dependency of the global `require`, an anonymous module, or a named root module, 
+    `./foo` is considered equivalent to `foo`;
+     as a dependency of a non-root named module, it is taken to be its sibling.
+
+(\*\*) as a dependency of a non-root named module, it is taken to be a sibling of its parent module, even if there is no grandparent module;
+       cannot be used in other contexts.
+
+The first three listed specifier traits correspond to different forms of "absolute" URLs and are naturally taken by 
+both module systems as absolute URLs.
+The remaining traits correspond to different forms of "relative" URLs.
+While the fourth trait, *name-prefixed without `js` extension*, is still taken equivalently by both systems, as an absolute name,
+the other three are taken differently.
+
+Let's look closer at each of these.
+
+### Name-prefixed with JS extension
+
+The import-maps specification treats all *name-prefixed* specifiers as *names*.
+AMD, on the other hand, takes any specifier ending with a `js` extension as a document-relative URL.
+When a specifier is an URL, AMD only applies the `urlArgs` configuration to it, to obtain a final URL. 
+The AMD configurations `map`, `paths`, `bundles` and `baseUrl` are not applied, nor a `js` extension is added.
+
+```js
+// AMD considers the first specifier to be an absolute name and
+// the second specifier to be a document-relative URL.
+global.require(["foo/bar", "foo/bar.js"], function(foo1, foo2) {
+  assert.not.equals(foo1, foo2);
+});
+```
+
+```js
+// Import-maps considers the specifier to be a name.
+import fooBar from "foo/bar.js";
+```
+
+The difference in treatment for these two types of specifiers is worrying as
+it does not allow for an AMD module to consume an ES6 module without knowing it is an ES6 module,
+and that it requires the JS extension to be included in the specifier.
+
+Likewise nor an ES6 module to consume an AMD module,
+using the same syntax for same things.
+
+### Directory and Parent-directory relative
+
+The import-maps specification does not support relative names and so specifiers starting with a `.` are considered directory-relative URLs.
+However, note, unlike with AMD, the mappings of import-maps are applied to both names and URL specifiers.
+
+On the other hand,
+AMD supports relative identifiers and so specifiers starting with a `.` are considered relative identifiers.
+
+AMD
+```js
+// AMD considers both specifiers to be identifiers.
+global.require(["foo", "./foo"], function(foo1, foo2) {
+  assert.equals(foo1, foo2);
+});
+
+// AMD considers this specifier invalid at global scope.
+global.require(["../foo"], function(foo) {
+
+});
+```
+
+Import Maps
+```js
+// Import-maps considers this specifier to be a name.
+import foo1 from "foo";
+
+// Import-maps considers this specifier to be a directory-relative URL.
+import foo2 from "./foo";
+
+assert.not.equals(foo1, foo2);
+```
+
+### Conclusion
+
+
 To ensure interoperability, 
 this AMD implementation interprets module identifiers with a `js` extension as bare modules,
 just like import maps do.
@@ -243,3 +357,12 @@ As such, it generally isn't an error for a script to not have a `define` call.
 Explain!
 Is there any issue with directly `import`ing URLs with fragments yielding different module instances?
 Are there any best practices to avoid the issue?
+
+## Code naming scheme
+
+Properties naming scheme to support indicating class accessibility *and* mangling.
+
+- `public` - public member; preserved
+- `_protected` - protected member; preserved
+- `__private` - private member; mangled
+- `$internal` - internal member (can be used by all AMD2 code); mangled

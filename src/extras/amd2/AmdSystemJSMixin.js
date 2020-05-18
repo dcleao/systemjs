@@ -27,6 +27,8 @@ import {
 } from "./util.js";
 
 import {
+  JS_EXT,
+  RE_AMD_ID_PREFIX,
   createDepSetter,
   isAbsoluteUrl,
   isResourceId,
@@ -105,37 +107,77 @@ objectCopy(prototype(SystemJS), /** @lends AmdSystemJSMixin# */{
     this.__forcedGetRegister = undefined;
   },
 
-  // Declared as a method to allow for unit testing.
-  /**
-   * Logs a given warning text.
-   *
-   * @param {string} text - The text to log.
-   * @internal
-   */
-  $warn: function(text) {
-    console.warn(text);
-  },
-
   /** @override */
   resolve: function(specifier, referralUrl) {
+
+    // An identifier which is an AMD dependency?
+    // amd:foo/bar ?
+    // See AbstractNode#$getDependency.
+    const isAmdSpec = RE_AMD_ID_PREFIX.test(specifier);
+    if (isAmdSpec) {
+      specifier = specifier.replace(RE_AMD_ID_PREFIX, "");
+    }
+
     try {
       // Give precedence to other resolution strategies.
       // Any isAbsoluteUrl(depId) is handled by import maps.
-      return baseSystemJS.resolve.apply(this, arguments);
+      const originalUrl = baseSystemJS.resolve.call(this, specifier, referralUrl);
 
+      // In the AMD identifier case, there's a need to double check.
+      // Otherwise, return immediately.
+      if (!isAmdSpec || isAbsoluteUrl(specifier)) {
+        return originalUrl;
+      }
+
+      // When there is no "package" mapping for the given specifier, "foo/bar",
+      // and the mapping key that matched was, for example, "foo/",
+      // the resulting URL should end in ".../bar".
+
+      // Yet, if there's no "package" mapping, in AMD, the result of resolving foo/bar.js should be returned instead.
+      // To detect if the current result is from a package mapping or not,
+      // we add the .js extension and check if the new result is the same plus the js extension.
+      try {
+        const withJsUrl = baseSystemJS.resolve.call(this, specifier + JS_EXT, referralUrl);
+        if (withJsUrl !== originalUrl + JS_EXT) {
+          // Assume it was a package mapping initially after all.
+          // Package mappings have priority.
+          return originalUrl;
+        }
+
+        // Import-Maps expect .js extension to be specified with modules identifiers,
+        // but being AMD dependency, had to add it.
+        return withJsUrl;
+      } catch (error2) {
+        // Did not have a mapping for foo/bar.js, but had for foo/bar.
+        // Assume a package mapping existed after all.
+        return originalUrl;
+      }
     } catch (error) {
       // No isAbsoluteUrl URLs here!
       if (!process.env.SYSTEM_PRODUCTION && isAbsoluteUrl(specifier)) {
-        throw error;
+        console.warn("Should not be an Absolute URL.");
+        throw createError("Should not be an Absolute URL.");
+      }
+
+      // If it was an AMD dependency (and there was no mapping for foo/bar),
+      // "foo/bar.js" has to be tested as well.
+      if (isAmdSpec) {
+        try {
+          return baseSystemJS.resolve.call(this, specifier + JS_EXT, referralUrl);
+        } catch (error3) {
+          // No mapping for JS_EXT as well.
+          // Continue to resolve against the Named and AMD registry.
+        }
       }
 
       // The `named-register.js` extra is loaded after,
       // but still, its `resolve` implementation checks the registry only
-      // after the base implementation, so it's necessary to check it here.
+      // if/after the base implementation throws, so it's necessary to check it here.
       if (hasOwn(this.__nameRegistry, specifier)) {
         return specifier;
       }
 
+      // Check the AMD "registry".
       const referralNode = this.__amdNodeOfUrl(referralUrl);
       const normalizedId = referralNode.normalizeDep(specifier);
 
@@ -616,7 +658,7 @@ objectCopy(prototype(SystemJS), /** @lends AmdSystemJSMixin# */{
     // TODO: Valid way to test if a module has already been defined?
     // Through the API, Node#require can ask for "module" dependency even if the module has not been loaded...
     if (definedNode.amdModule) {
-      this.$warn("Module '" + (definedNode.id || url) + "' is already defined. Ignoring.");
+      console.warn("Module '" + (definedNode.id || url) + "' is already defined. Ignoring.");
       return;
     }
 

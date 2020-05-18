@@ -32,15 +32,14 @@ import {
   SPEC_SIMPLE,
   createDepSetter,
   resolveUseDefault,
-  removeJsExtension,
   parseResourceId,
   buildResourceId,
   isResourceId,
   isUnnormalizedId,
   isAbsoluteUrl,
   absolutizeId,
+  RE_AMD_ID_PREFIX,
   PATH_SEPARATOR,
-  JS_EXT,
   RE_RESOURCE_ID_UNNORMALIZED,
   RESOURCE_UNNORMALIZED
 } from "../common.js";
@@ -219,22 +218,6 @@ objectCopy(prototype(AbstractNode), /** @lends AbstractNode# */{
   },
 
   /**
-   * Gets the leaf identifier of this node, if any; `null`, otherwise.
-   *
-   * The _leaf_ identifier is suitable for identifying a leaf module -
-   * one which is loaded and whose main part of the identifier ends with `.js`.
-   *
-   * E.g. `my/plugin.js!resource`
-   * E.g. `my/module.js`
-   *
-   * @name leafId
-   * @memberOf AbstractNode#
-   * @type {?string}
-   * @readonly
-   * @abstract
-   */
-
-  /**
    * Gets the parent node of this node, if any; `null`, otherwise.
    *
    * @name parent
@@ -341,7 +324,7 @@ objectCopy(prototype(AbstractNode), /** @lends AbstractNode# */{
 
     let parent = this;
 
-    const names = removeJsExtension(normalizedId).split(PATH_SEPARATOR);
+    const names = normalizedId.split(PATH_SEPARATOR);
     const L = length(names);
     let i = -1;
     let node;
@@ -360,14 +343,9 @@ objectCopy(prototype(AbstractNode), /** @lends AbstractNode# */{
   // - Throws on URLs via $normalizeSimple
   //
   // isFull:
-  // 1. Removes ".js" from main part of id.
-  // 2. Applies map.
-  // 3. Applies package main.
-  //
-  // isLeaf:
-  // 1. adds ".js" to head part after normalization
-  // NOTE: resource identifiers are always isLeaf
-  normalize: function(id, isFull, isLax, isLeaf) {
+  // 1. Applies map.
+  // 2. Applies package main.
+  normalize: function(id, isFull, isLax) {
     if (isLax) {
       if (!id) {
         return null;
@@ -381,15 +359,13 @@ objectCopy(prototype(AbstractNode), /** @lends AbstractNode# */{
     // const [simpledId = id, resourceName] = parseResourceId(id);
     let simpleId = id;
     let resourceName = null;
-    let isLeafEf = !!isLeaf;
     const resourceIdParts = parseResourceId(id);
     if (resourceIdParts) {
       simpleId = resourceIdParts[0];
       resourceName = resourceIdParts[1];
-      isLeafEf = true;
     }
 
-    simpleId = this.$normalizeSimple(simpleId, isFull, isLax, isLeafEf);
+    simpleId = this.$normalizeSimple(simpleId, isFull, isLax);
 
     if (resourceIdParts) {
       return buildResourceId(simpleId, this.__normalizePluginResource(simpleId, resourceName));
@@ -402,7 +378,6 @@ objectCopy(prototype(AbstractNode), /** @lends AbstractNode# */{
   // Does not support URLs.
   // Resolves "./" and "../" relative to this node's identifier.
   // - Throws on going above this node's id.
-  // Removes .js extension, if any.
   // Strict / NonLax
   // - Throws on STAR.
   // - Throws on empty.
@@ -416,12 +391,8 @@ objectCopy(prototype(AbstractNode), /** @lends AbstractNode# */{
   // - applies maps
   // - resolves package main
   //
-  // isLeaf:
-  // - in the end, adds .js extension.
-  //
   // isLax: allows "*" and the "!" character; for use in resource ids.
-  // isLeaf: adds ".js" to head part after normalization
-  $normalizeSimple: function(simpleId, isFull, isLax, isLeaf) {
+  $normalizeSimple: function(simpleId, isFull, isLax) {
 
     if (isLax) {
       if (!simpleId) {
@@ -431,7 +402,7 @@ objectCopy(prototype(AbstractNode), /** @lends AbstractNode# */{
       assertSpecifier(simpleId, SPEC_SIMPLE);
     }
 
-    let normalizedId = absolutizeId(removeJsExtension(simpleId), this.parentId);
+    let normalizedId = absolutizeId(simpleId, this.parentId);
 
     if (isFull) {
 
@@ -450,22 +421,18 @@ objectCopy(prototype(AbstractNode), /** @lends AbstractNode# */{
       }
     }
 
-    if (isLeaf) {
-      normalizedId += JS_EXT;
-    }
-
     return normalizedId;
   },
 
   // require(["idOrAbsURL", ...]
   normalizeDep: function(depId) {
-    return isAbsoluteUrl(depId) ? depId : this.normalize(depId, true, false, true);
+    return isAbsoluteUrl(depId) ? depId : this.normalize(depId, true);
   },
 
   // define(id, ...
   $normalizeDefined: function(definedId) {
     // Ensure normalized (assumes normalize is idempotent...)
-    return this.normalize(definedId, true, false, true);
+    return this.normalize(definedId, true);
   },
 
   __normalizePluginResource: function(normalizedPluginId, resourceName) {
@@ -491,23 +458,23 @@ objectCopy(prototype(AbstractNode), /** @lends AbstractNode# */{
   __normalizePluginLoadedResource: function(plugin, resourceName) {
 
     // Remove the unnormalized marker, if one exists.
-    const $originalResourceName = resourceName.replace(RE_RESOURCE_ID_UNNORMALIZED, "");
+    const originalResourceName = resourceName.replace(RE_RESOURCE_ID_UNNORMALIZED, "");
 
     if (plugin.normalize) {
-      return plugin.normalize($originalResourceName, this.__normalizeResource.bind(this));
+      return plugin.normalize(originalResourceName, this.__normalizeResource.bind(this));
     }
 
     // Per RequireJS, nested plugin calls would not normalize correctly...
-    if (isResourceId($originalResourceName)) {
-      return $originalResourceName;
+    if (isResourceId(originalResourceName)) {
+      return originalResourceName;
     }
 
-    return this.__normalizeResource($originalResourceName);
+    return this.__normalizeResource(originalResourceName);
   },
 
   // Default normalization used when loader plugin does not have a normalize method.
   __normalizeResource: function(resourceName) {
-    return this.$normalizeSimple(resourceName, true, true, false);
+    return this.$normalizeSimple(resourceName, true, true);
   },
 
   /**
@@ -621,7 +588,9 @@ objectCopy(prototype(AbstractNode), /** @lends AbstractNode# */{
         return resolveUseDefault(systemJS.get(depUrl));
       }
 
-      throw createError("Dependency '" + normalizedSpecifier + "' isn't loaded yet.");
+      const originalNormalizedSpecifier = normalizedSpecifier.replace(RE_AMD_ID_PREFIX, "");
+
+      throw createError("AMD dependency '" + originalNormalizedSpecifier + "' isn't loaded yet.");
     });
   },
 
@@ -638,6 +607,8 @@ objectCopy(prototype(AbstractNode), /** @lends AbstractNode# */{
       return callback(depRef, this.__getOrCreateAmdModule().exports, true);
     }
 
-    return callback(this.normalizeDep(depRef), undefined, false);
+    // Mark AMD dependencies with the "amd:" prefix because these have special
+    // handling by resolve to match AMD semantics.
+    return callback("amd:" + this.normalizeDep(depRef), undefined, false);
   }
 });

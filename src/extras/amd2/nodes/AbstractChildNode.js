@@ -231,10 +231,9 @@ classExtend(AbstractChildNode, AbstractNode, /** @lends AbstractChildNode# */{
 
     /** @type AmdModule */
     const amdModule = {
-      // NOTE: that the AMD module utilizes the leaf identifier!
       // Per RequireJS, when there is no AMD context,
       // the id of a "module" dependency is its URL.
-      id: (this.leafId || url),
+      id: (this.id || url),
       uri: url,
 
       config: function() {
